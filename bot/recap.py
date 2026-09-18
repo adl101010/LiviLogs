@@ -5,7 +5,6 @@ here and tolerates missing fields rather than crashing a raid-night post. Shape 
 real retail and Classic logs on 2026-09-18 (see tests/fixtures).
 """
 
-import math
 import unicodedata
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -23,11 +22,6 @@ _FOLD = str.maketrans({"ø": "o", "æ": "ae", "œ": "oe", "ð": "d", "þ": "th",
 def _fold(text: str) -> str:
     text = unicodedata.normalize("NFKD", text.casefold().translate(_FOLD))
     return "".join(ch for ch in text if not unicodedata.combining(ch))
-
-
-def whole(pct: float) -> int:
-    """A parse the way WCL shows it: decimals dropped, never rounded up (95.9 is a 95)."""
-    return math.floor(pct + 1e-9)
 
 
 def norm_name(name: str) -> str:
@@ -95,9 +89,9 @@ class Boss:
 @dataclass
 class ParseLine:
     char: Char
-    average: int  # WCL's number: plain average of the night's kills, decimals dropped
+    average: float  # rounded to 1 decimal. WCL's site shows the same average with the decimals dropped
     role: str
-    parses: list[tuple[float, str]]  # (percent, boss) per kill, as WCL sent it
+    parses: list[tuple[float, str]]  # (percent, boss) per kill
 
     @property
     def kills(self) -> int:
@@ -290,8 +284,7 @@ def _parse_lines(parses: dict[Char, list[tuple[float, str, str]]]) -> list[Parse
         # A player counts as a tank for the night only if they tanked most of their kills.
         others = Counter({r: n for r, n in roles.items() if r != TANK})
         role = TANK if roles[TANK] * 2 > len(entries) or not others else others.most_common(1)[0][0]
-        # Checked against the site: Holyshtter 95.86 shows as 95, Fstingnemo 46.71 as 46.
-        average = whole(sum(pct for pct, _, _ in entries) / len(entries))
+        average = round(sum(pct for pct, _, _ in entries) / len(entries), 1)
         lines.append(ParseLine(char, average, role, [(pct, boss) for pct, _, boss in entries]))
     return lines
 

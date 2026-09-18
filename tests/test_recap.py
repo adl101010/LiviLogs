@@ -42,16 +42,15 @@ def names_of(chars):
 
 def test_averages_are_per_night():
     night = analyze(report(), SETTINGS)
-    # WCL drops the decimals: Pumper's 94.5 shows as 94.
-    assert [(p.char.name, p.average, p.kills) for p in night.high] == [("Pumper", 94, 2), ("Middling", 90, 2)]
+    assert [(p.char.name, p.average, p.kills) for p in night.high] == [("Pumper", 94.5, 2), ("Middling", 90.0, 2)]
 
 
 def test_healers_use_healing_parses_and_others_use_damage():
     night = analyze(report(), SETTINGS)
     by_name = {p.char.name: p for p in night.parses}
-    assert by_name["Healz"].average == 65  # 60 and 70 healing, not 3 damage
-    assert by_name["Tanky"].average == 6  # damage (5 and 8), not the 99 in the healing table
-    assert by_name["Greyson"].average == 20  # "-" in the healing table is ignored
+    assert by_name["Healz"].average == 65.0  # 60 and 70 healing, not 3 damage
+    assert by_name["Tanky"].average == 6.5  # damage, not the 99 in the healing table
+    assert by_name["Greyson"].average == 20.0  # "-" in the healing table is ignored
 
 
 def test_grey_excludes_tanks_by_default():
@@ -149,9 +148,9 @@ def test_headline():
         "📜 **Raid report** · Liberation of Undermine · Heroic · <t:1758070800:D> · 2 bosses down · 5 pulls · 20m",
         f"<{URL}>",
         "📈 **Boss C:** 2 wipes, best P2 at 30%",
-        "🏆 **Top DPS:** <@111> 94 · **Top healer:** **Healz** 65 · **Top tank:** **Tanky** 6",
-        "🌟 **90+:** <@111> (damage 94) · **Middling** (damage 90)",
-        "🗑️ **Grey:** <@222> (damage 20)",
+        "🏆 **Top DPS:** <@111> 94.5 · **Top healer:** **Healz** 65.0 · **Top tank:** **Tanky** 6.5",
+        "🌟 **90+:** <@111> (damage 94.5) · **Middling** (damage 90.0)",
+        "🗑️ **Grey:** <@222> (damage 20.0)",
         "💀 **Floor inspector:** **Dyer** (3 deaths)",
         "🧵 Full report in the thread ↓",
     ]
@@ -174,9 +173,9 @@ def test_the_night():
 
 def test_leaderboard_uses_wcl_colours_and_crowns_the_top():
     board = full_text().thread[1].text.splitlines()
-    assert board[1] == "⚔️ 👑 🟪 **Pumper** 94 · **Middling** 90 · 🟩 **Dyer** 45 · ⬜ **Greyson** 20"
-    assert board[2] == "💚 👑 🟦 **Healz** 65"
-    assert board[3] == "🛡️ 👑 ⬜ **Tanky** 6"
+    assert board[1] == "⚔️ 👑 🟪 **Pumper** 94.5 · **Middling** 90.0 · 🟩 **Dyer** 45.0 · ⬜ **Greyson** 20.0"
+    assert board[2] == "💚 👑 🟦 **Healz** 65.0"
+    assert board[3] == "🛡️ 👑 ⬜ **Tanky** 6.5"
 
 
 def test_awards():
@@ -241,7 +240,7 @@ def test_history_adds_progress_and_streaks():
     text = all_text(full_text(history=history))
     assert "📈 **Boss C:** 2 wipes, best P2 at 30% · last raid's best: P3 at 44%" in text
     assert "💀 **Floor inspector:** **Dyer** (3 deaths, 3 raids running)" in text
-    assert "🗑️ **Grey:** **Greyson** (damage 20, 2 raids running)" in text
+    assert "🗑️ **Grey:** **Greyson** (damage 20.0, 2 raids running)" in text
     assert "🧽 **Damage sponge:** **Dyer**, 100M damage taken (2 raids running)" in text
 
 
@@ -262,14 +261,6 @@ def test_leaderboard_ping_setting():
     lines = build_lines(night, SETTINGS)
     quiet = render_report(night, lines, URL, lambda c: None, thread_ping_everyone=False)
     assert [m.pings for m in quiet.thread] == [True, False, True, True, True]
-
-
-def test_parses_show_like_wcl():
-    from bot.recap import whole
-    # Checked against the site: Holyshtter's 95.86 average shows as 95, Fstingnemo's 46.71 as 46.
-    assert whole(95.857) == 95 and whole(46.714) == 46
-    assert whole(89.99) == 89  # so 89.99 is not in the 90+ club, just like on WCL
-    assert whole(90.0) == 90 and whole(270 / 3) == 90  # float noise doesn't knock 90 down to 89
 
 
 def test_fmt_health():

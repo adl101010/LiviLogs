@@ -220,6 +220,13 @@ class WCLClient:
             raise WCLError("; ".join(e.get("message", "") for e in errors))
         return report
 
+    async def image_exists(self, url: str) -> bool:
+        try:
+            resp = await self._http.head(url, timeout=5)
+        except httpx.HTTPError:
+            return False
+        return resp.status_code == 200 and resp.headers.get("content-type", "").startswith("image/")
+
     async def report_status(self, ref: ReportRef) -> dict:
         return await self.query(ref.host, _STATUS_QUERY, {"code": ref.code})
 

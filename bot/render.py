@@ -1,11 +1,13 @@
-"""Report lines -> Discord messages: a headline for #logs, and a thread of sections under it.
+"""Report lines -> cards: a headline card for #logs and one card per section in the thread under it.
 
-Mentions go in message text, never in embeds: Discord shows @names inside embeds but doesn't
-notify anyone, which would defeat the point.
+A card is plain data (title, blocks of markdown, colour, optional thumbnail and link button). The
+Discord side turns it into a components-v2 container; card_text() gives the same content as plain
+markdown for the probe and as a fallback. Mentions inside a container's text still ping (unlike
+embeds), so the ping rules are the same as for ordinary messages.
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Callable
 from zoneinfo import ZoneInfo
@@ -15,36 +17,50 @@ from .awards import (
 )
 from .recap import Char, Night
 
-DISCORD_LIMIT = 2000
+# Discord's limits for one components-v2 message: 4,000 characters of text across the whole
+# message and 40 components. A card uses 1 + 2 per block + a few for the header, footer and
+# button, so the block cap keeps well clear of 40.
+TEXT_LIMIT = 3800
+MAX_BLOCKS = 15
 THREAD_NAME_LIMIT = 100
 
 # WCL difficulty ids. Classic uses the same numbers for normal/heroic.
 DIFFICULTY = {1: "LFR", 3: "Normal", 4: "Heroic", 5: "Mythic"}
 
+GOLD, ORANGE, BLURPLE, PURPLE, GREEN, RED, GREY, TEAL = (
+    0xF0B232, 0xE67E22, 0x5865F2, 0xA335EE, 0x2ECC71, 0xED4245, 0x99AAB5, 0x1ABC9C,
+)
+
 SECTIONS = [
-    (NIGHT, "🗺️ **The night**"),
-    (BOARD, None),  # title depends on whether there were kills
-    (HIGHLIGHTS, "🌟 **Highlights**"),
-    (LOWLIGHTS, "🤡 **Lowlights**"),
-    (DEATHS, "💀 **Deaths**"),
-    (CONSUMABLES, "🧪 **Consumables**"),
+    (NIGHT, "🗺️ The night", BLURPLE),
+    (BOARD, None, PURPLE),  # title depends on whether there were kills
+    (HIGHLIGHTS, "🌟 Highlights", GREEN),
+    (LOWLIGHTS, "🤡 Lowlights", RED),
+    (DEATHS, "💀 Deaths", GREY),
+    (CONSUMABLES, "🧪 Consumables", TEAL),
 ]
 
 _MENTION = re.compile(r"<@(\d+)>")
 
 
 @dataclass
-class Message:
-    text: str
+class Card:
+    title: str
+    accent: int
+    blocks: list[str]  # markdown; the card draws a divider between blocks
+    subtitle: str | None = None
+    thumbnail: str | None = None  # image URL shown beside the title
+    button: tuple[str, str] | None = None  # (label, url) link button at the bottom
+    footer: str | None = None  # small print at the bottom
     pings: bool = True  # False: mentions show as names but notify nobody
 
 
 @dataclass
 class Rendered:
-    headline: str
+    headline: Card
     thread_title: str
-    thread: list[Message]
-    unlinked: list[Char]
+    thread: list[Card]
+    unlinked: list[Char] = field(default_factory=list)
 
 
 def mentioned_ids(text: str) -> list[int]:
@@ -65,18 +81,39 @@ class _Names:
         return f"**{char.name}**"
 
 
-def _text(lines: list[Line], who: _Names) -> list[str]:
-    """Lines to text; consecutive lines in the same group share one line."""
-    out: list[str] = []
-    group = None
+def line_text(line: Line, who: _Names) -> str:
+    body = "".join(who(p) if isinstance(p, Char) else p for p in line.parts)
+    if not line.title:
+        return body
+    if line.is_stacked:
+        note = f"\n-# {line.note}" if line.note else ""
+        return f"**{line.title}**{note}\n{body}"
+    return f"**{line.title}** {body}"
+
+
+def _blocks(lines: list[Line], who: _Names) -> list[str]:
+    """One block per cluster, in the order clusters first appear; stacked callouts get a blank line
+    between them so each reads as its own item."""
+    order: list[str] = []
+    grouped: dict[str, list[Line]] = {}
     for line in lines:
-        text = "".join(who(p) if isinstance(p, Char) else p for p in line.parts)
-        if line.group and line.group == group:
-            out[-1] += " · " + text
-        else:
-            out.append(text)
-        group = line.group
-    return out
+        if line.cluster not in grouped:
+            order.append(line.cluster)
+            grouped[line.cluster] = []
+        grouped[line.cluster].append(line)
+    blocks = []
+    for cluster in order:
+        text = ""
+        previous: Line | None = None
+        for line in grouped[cluster]:
+            piece = line_text(line, who)
+            if text:
+                spaced = any(item is not None and item.title and item.is_stacked for item in (line, previous))
+                text += "\n\n" if spaced else "\n"
+            text += piece
+            previous = line
+        blocks.append(text)
+    return blocks
 
 
 def _local_date(night: Night, tz: ZoneInfo) -> str:
@@ -84,10 +121,21 @@ def _local_date(night: Night, tz: ZoneInfo) -> str:
     return f"{when:%b} {when.day}"
 
 
-def _title(night: Night) -> str:
+def _subject(night: Night) -> str:
     if not night.kills and len(night.bosses) == 1:
         return night.bosses[0].name
     return night.zone or night.title
+
+
+def featured_boss(night: Night) -> int | None:
+    """The boss whose picture goes on the headline: the prog boss on a night without kills (the
+    most pulled), otherwise the last boss killed."""
+    if not night.bosses:
+        return None
+    if not night.kills:
+        return max(night.bosses, key=lambda b: len(b.pulls)).encounter_id
+    killed = [b for b in night.bosses if b.killed]
+    return max(killed, key=lambda b: max(p.end for p in b.pulls)).encounter_id
 
 
 def render_report(
@@ -97,56 +145,127 @@ def render_report(
     user_for: Callable[[Char], int | None],
     tz: ZoneInfo = ZoneInfo("UTC"),
     thread_ping_everyone: bool = True,
+    thumbnail: str | None = None,
 ) -> Rendered:
     who = _Names(user_for)
     prog = not night.kills
     kind = "Prog report" if prog else "Raid report"
 
-    header = [f"📜 **{kind}** · {_title(night)}"]
+    facts = []
     if night.difficulty in DIFFICULTY:
-        header.append(DIFFICULTY[night.difficulty])
+        facts.append(DIFFICULTY[night.difficulty])
     if night.start_ms:
-        header.append(f"<t:{night.start_ms // 1000}:D>")  # shows in each reader's own timezone
-    header.append(plural(len(night.pulls), "pull"))
+        facts.append(f"<t:{night.start_ms // 1000}:D>")  # shows in each reader's own timezone
     if prog:
-        header.append("no kill yet" if night.pulls else "no boss pulls")
+        facts.append(plural(len(night.pulls), "pull"))
+        facts.append("no kill yet" if night.pulls else "no boss pulls")
     else:
         killed = sum(1 for b in night.bosses if b.killed)
-        header.insert(-1, f"{killed} {'boss' if killed == 1 else 'bosses'} down")
+        facts.append(f"{killed} {'boss' if killed == 1 else 'bosses'} down")
+        facts.append(plural(len(night.pulls), "pull"))
         if night.span_seconds:
-            header.append(fmt_duration(night.span_seconds))
-    headline = [" · ".join(header), f"<{url}>"]
-    if night.processing:
-        headline.append("⏳ WCL is still processing this log, so parses may still change.")
-    headline += _text([line for line in lines if line.section == HEADLINE], who)
+            facts.append(fmt_duration(night.span_seconds))
 
-    thread: list[Message] = []
-    for section, title in SECTIONS:
+    headline_blocks = _blocks([line for line in lines if line.section == HEADLINE], who)
+    notes = []
+    if night.processing:
+        notes.append("⏳ WCL is still processing this log, so parses may still change.")
+
+    thread: list[Card] = []
+    for section, title, accent in SECTIONS:
         section_lines = [line for line in lines if line.section == section]
         if not section_lines:
             continue
+        subtitle = None
         if section == BOARD:
-            title = ("📊 **Parses**" if night.has_parses
-                     else "📊 **Throughput** (raw numbers, since wipes don't get parses)")
-        body = _text(section_lines, who)
-        thread.append(Message("\n".join([title, *body]), pings=thread_ping_everyone or section != BOARD))
+            title = "📊 Parses" if night.has_parses else "📊 Throughput"
+            subtitle = None if night.has_parses else "Raw numbers: wipes don't get parses"
+        thread.append(Card(title, accent, _blocks(section_lines, who), subtitle=subtitle,
+                           pings=thread_ping_everyone or section != BOARD))
 
     if thread:
-        headline.append("🧵 Full report in the thread ↓")
+        notes.append("🧵 Full report in the thread")
     if who.unlinked:
-        names = ", ".join(c.name for c in who.unlinked)
-        note = f"-# Not linked: {names}. Use `/link` so the bot can tag you."
+        nudge = f"Not linked: {', '.join(c.name for c in who.unlinked)}. An admin can /link them so the bot can tag them."
         if thread:
-            thread[-1].text += "\n" + note
+            thread[-1].footer = nudge
         else:
-            headline.append(note)
+            notes.append(nudge)
 
-    thread_title = f"{kind} · {_local_date(night, tz)} · {_title(night)}" if night.start_ms else kind
-    return Rendered("\n".join(headline), thread_title[:THREAD_NAME_LIMIT], thread, who.unlinked)
+    headline = Card(
+        f"{kind} · {_subject(night)}",
+        ORANGE if prog else GOLD,
+        headline_blocks,
+        subtitle=" · ".join(facts),
+        thumbnail=thumbnail,
+        button=("View log on Warcraft Logs", url),
+        footer=" · ".join(notes) or None,
+    )
+    thread_title = f"{kind} · {_local_date(night, tz)} · {_subject(night)}" if night.start_ms else kind
+    return Rendered(headline, thread_title[:THREAD_NAME_LIMIT], [c for card in thread for c in split_card(card)],
+                    who.unlinked)
 
 
-def split_message(text: str, limit: int = DISCORD_LIMIT) -> list[str]:
-    """Split on line breaks so no chunk passes Discord's length limit."""
+def card_text(card: Card) -> str:
+    """The card as plain markdown: what the probe prints, and the fallback if a card is refused."""
+    parts = [f"### {card.title}"]
+    if card.subtitle:
+        parts[0] += f"\n-# {card.subtitle}"
+    parts += card.blocks
+    if card.footer:
+        parts.append(f"-# {card.footer}")
+    if card.button:
+        parts.append(f"[{card.button[0]}](<{card.button[1]}>)")
+    return "\n\n".join(parts)
+
+
+def split_card(card: Card, limit: int = TEXT_LIMIT, max_blocks: int = MAX_BLOCKS) -> list[Card]:
+    """Keep each card inside one Discord message's limits; an overflowing card continues in a
+    second card with the same colour. A single block that is itself too long is split on lines."""
+    blocks: list[str] = []
+    for block in card.blocks:
+        blocks += _split_block(block, limit - 300)
+    cards: list[Card] = []
+    current: list[str] = []
+    fixed = len(card.title) + len(card.subtitle or "") + len(card.footer or "") + 200
+    for block in blocks:
+        size = fixed + sum(len(b) for b in current) + len(block)
+        if current and (size > limit or len(current) >= max_blocks):
+            cards.append(replace(card, blocks=current, footer=None, button=None))
+            current = []
+        current.append(block)
+    cards.append(replace(card, blocks=current))
+    for i, c in enumerate(cards[1:], 1):
+        cards[i] = replace(c, title=f"{card.title} (continued)", subtitle=None, thumbnail=None)
+    return cards
+
+
+def _split_block(block: str, limit: int) -> list[str]:
+    if len(block) <= limit:
+        return [block]
+    out, current = [], ""
+    for line in block.split("\n"):
+        while len(line) > limit:  # one enormous line (a very long list of names): cut it
+            if current:
+                out.append(current)
+                current = ""
+            cut = line.rfind(" · ", 0, limit)
+            cut = cut if cut > 0 else limit
+            out.append(line[:cut])
+            line = line[cut:].lstrip(" ·")
+        candidate = f"{current}\n{line}" if current else line
+        if len(candidate) > limit:
+            out.append(current)
+            current = line
+        else:
+            current = candidate
+    if current:
+        out.append(current)
+    return out
+
+
+def split_message(text: str, limit: int = 2000) -> list[str]:
+    """Split on line breaks so no plain message passes Discord's 2,000-character limit."""
     chunks: list[str] = []
     current = ""
     for line in text.split("\n"):

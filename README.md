@@ -1,20 +1,34 @@
 # LiviLogs
 
 A Discord bot for WoW guilds. When a Warcraft Logs link is posted after raid, it reads the whole
-night and posts a report that tags the actual people: a short headline in the logs channel, and the
-full report in a thread under it.
+night and posts a report that tags the actual people: a headline card in the logs channel, and the
+full report as a thread of cards under it.
+
+Each card has a coloured edge, dividers between groups of callouts and small print explaining what
+each one means. The headline card carries the boss's picture and a **View log on Warcraft Logs**
+button:
 
 ```
-📜 Raid report · The Venomous Abyss · Heroic · Sep 15 · 7 bosses down · 18 pulls · 2h 27m
-📈 Ula'tek: 8 wipes, best P3 at 44%
-🏆 Top DPS: @Zugzug 89.4 · Top healer: @Bubbleheart 96.0 · Top tank: @Tankenstein 82.0
-🌟 90+: @Bubbleheart (healing 96.0)
-🗑️ Grey: @Totemtoss (healing 20.9)
-💀 Floor inspector: @Facepull (11 deaths)
-🧵 Full report in the thread ↓
+┃ Raid report · The Venomous Abyss                                    [boss]
+┃ Heroic · Sep 15, 2026 · 7 bosses down · 18 pulls · 2h 27m
+┃ ─────────────────────────────────────────
+┃ 🏆 Top DPS @Zugzug 88.6
+┃ 💚 Top healer @Bubbleheart 95.9
+┃ 🛡️ Top tank @Tankenstein 81.1
+┃ 📈 Ula'tek 8 wipes · best P3 at 44%
+┃ ─────────────────────────────────────────
+┃ 🌟 90+ @Bubbleheart healing 95.9
+┃ 🗑️ Grey @Totemtoss healing 20.3
+┃ 💀 Floor inspector @Facepull 11 deaths
+┃ 🧵 Full report in the thread
+┃ [ View log on Warcraft Logs ↗ ]
 ```
 
-The thread has six sections, each posted only if it has something to say:
+The cards use Discord's newer message layout ("components v2"), where @mentions still ping (unlike
+embeds). If Discord ever refuses a card, the bot sends the same content as ordinary messages
+instead, so a report is never lost.
+
+The thread has six sections, each its own card, posted only if it has something to say:
 
 | Section | What's in it |
 |---|---|
@@ -77,13 +91,18 @@ is only posted once.
 
 | Command | What it does |
 |---|---|
-| `/link <character> [realm] [member]` | Link a character to yourself. Officers can link for someone else. Alts are fine. The character box autocompletes from logs the bot has seen |
-| `/unlink <character> [realm]` | Remove a link (your own, or anyone's if you're an officer) |
-| `/links [member]` | Show someone's characters; with no member, list who from the last report isn't linked |
+| `/link <member> <characters> [realm]` | **Admins.** Link one or more characters to a member, comma-separated: `Bob, Bobalt, Bobdruid-Argent Dawn`. A person can have any number of characters (alts); whichever one shows up in a log tags them. Linking a character that belongs to someone else moves it, and says so. The box autocompletes from logs the bot has seen |
+| `/unlink <character> [realm]` | **Admins.** Remove a link |
+| `/links [member]` | Anyone. Show someone's characters; with no member, list who from the last report isn't linked |
 | `/recap <link>` | Post the report right now, without waiting |
 | `/recap <link> record_only:True` | Add a past night to history without posting it, so "last raid's best" and streaks work from the first real post |
 
-Unlinked characters still appear in the report, in bold, with a nudge to `/link` at the end of the thread.
+Unlinked characters still appear in the report, in bold, with a nudge at the end of the thread.
+
+**Who counts as an admin:** Discord shows `/link` and `/unlink` only to members with the **Manage
+Server** permission, and refuses them from anyone else. To let officers link people without giving
+them Manage Server, go to Server Settings → Integrations → LiviLogs and allow their role on those two
+commands.
 
 ## Setup
 
@@ -108,8 +127,7 @@ every Classic site. A report costs roughly 20-45 of the 3,600 points WCL allows 
 ### 3. IDs
 
 In Discord: Settings → Advanced → **Developer Mode** on. Then right-click the logs channel → Copy
-Channel ID (`WATCH_CHANNEL_IDS`), your server icon → Copy Server ID (`DISCORD_GUILD_ID`), and the
-officer role → Copy Role ID (`OFFICER_ROLE_ID`).
+Channel ID (`WATCH_CHANNEL_IDS`) and your server icon → Copy Server ID (`DISCORD_GUILD_ID`).
 
 ### 4. Run it
 
@@ -151,9 +169,9 @@ with the names replaced.
 | `bot/wcl.py` | WCL API: login, the one big GraphQL query, link parsing |
 | `bot/recap.py` | Raw WCL JSON → facts about the night. No network; all JSON parsing lives here |
 | `bot/awards.py` | The night → headline, callouts and sections. Each callout decides if it has something to say |
-| `bot/render.py` | Lines → Discord messages: headline, thread title, thread sections |
+| `bot/render.py` | Lines → cards: headline card, thread title, one card per section; plain-text version for fallback and the probe |
 | `bot/watch.py` | "Is this log finished?" |
 | `bot/store.py` | SQLite: links, seen characters, report status, history |
-| `bot/main.py` | Discord: channel watcher, slash commands, posting, threads, pings |
+| `bot/main.py` | Discord: channel watcher, slash commands, cards (components v2), threads, pings |
 
 Pushing `dev` builds `ghcr.io/adl101010/livilogs:dev`; pushing `master` builds `:stable` and `:latest`.

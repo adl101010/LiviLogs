@@ -1,10 +1,10 @@
 from dataclasses import replace
 from zoneinfo import ZoneInfo
 
-from bot.awards import BossResult, Line, build_lines, fmt_health
+from bot.awards import BossResult, build_lines, fmt_health
 from bot.config import RecapSettings
 from bot.recap import Char, DeathLine, _top_with_ties, analyze, norm_name, norm_realm
-from bot.render import render_report, split_message
+from bot.render import Card, card_text, render_report, split_card, split_message
 
 from .sample_report import report
 
@@ -24,7 +24,7 @@ def full_text(data=None, settings=SETTINGS, history=None, links=None, tz=ZoneInf
 
 
 def all_text(rendered):
-    return "\n".join([rendered.headline] + [m.text for m in rendered.thread])
+    return "\n".join(card_text(card) for card in [rendered.headline, *rendered.thread])
 
 
 # --- analysis ------------------------------------------------------------------------------------
@@ -142,52 +142,94 @@ def test_name_and_realm_normalising():
 # --- the report ----------------------------------------------------------------------------------
 
 
-def test_headline():
+def test_headline_card():
     r = full_text(links={"Pumper": 111, "Greyson": 222})
-    assert r.headline.splitlines() == [
-        "📜 **Raid report** · Liberation of Undermine · Heroic · <t:1758070800:D> · 2 bosses down · 5 pulls · 20m",
-        f"<{URL}>",
-        "📈 **Boss C:** 2 wipes, best P2 at 30%",
-        "🏆 **Top DPS:** <@111> 94.5 · **Top healer:** **Healz** 65.0 · **Top tank:** **Tanky** 6.5",
-        "🌟 **90+:** <@111> (damage 94.5) · **Middling** (damage 90.0)",
-        "🗑️ **Grey:** <@222> (damage 20.0)",
-        "💀 **Floor inspector:** **Dyer** (3 deaths)",
-        "🧵 Full report in the thread ↓",
+    card = r.headline
+    assert card.title == "Raid report · Liberation of Undermine"
+    assert card.subtitle == "Heroic · <t:1758070800:D> · 2 bosses down · 5 pulls · 20m"
+    assert card.accent == 0xF0B232  # gold for a kill night
+    assert card.button == ("View log on Warcraft Logs", URL)
+    assert card.blocks == [
+        "**🏆 Top DPS** <@111> 94.5\n"
+        "**💚 Top healer** **Healz** 65.0\n"
+        "**🛡️ Top tank** **Tanky** 6.5\n"
+        "**📈 Boss C** 2 wipes · best P2 at 30%",
+        "**🌟 90+** <@111> damage 94.5 · **Middling** damage 90.0\n"
+        "**🗑️ Grey** <@222> damage 20.0\n"
+        "**💀 Floor inspector** **Dyer** 3 deaths",
     ]
+    assert card.footer == "🧵 Full report in the thread"
 
 
-def test_thread_sections_in_order():
+def test_thread_cards_in_order_with_their_colours():
     r = full_text()
-    assert [m.text.splitlines()[0] for m in r.thread] == [
-        "🗺️ **The night**", "📊 **Parses**", "🌟 **Highlights**", "🤡 **Lowlights**", "💀 **Deaths**",
-        "🧪 **Consumables**",
+    assert [(c.title, c.accent) for c in r.thread] == [
+        ("🗺️ The night", 0x5865F2), ("📊 Parses", 0xA335EE), ("🌟 Highlights", 0x2ECC71),
+        ("🤡 Lowlights", 0xED4245), ("💀 Deaths", 0x99AAB5), ("🧪 Consumables", 0x1ABC9C),
     ]
 
 
-def test_consumables():
-    section = full_text().thread[-1].text.splitlines()
-    assert section[:10] == [
-        "🧪 **Consumables**",
-        "🔮 **Tryhards** (Void-Touched rune): **Pumper** every pull · **Middling** 3 of 5",
-        "🍺 **Potion seller:** **Pumper**, 6 combat potions in 5 pulls",
-        "🫗 **Mana chugger:** **Healz**, 4 mana potions",
-        "🍪 **Cookie monster:** **Middling**, 10 healthstones and health potions",
-        # Tanky drank none; Greyson one in 5. Healz drank mana potions, so isn't a hoarder.
-        "🧪 **Potion hoarders** (no combat potion): **Tanky**, not a single one all night · **Greyson** on 4 of 5 pulls",
-        # Dyer died 3 times but used healthstones; Greyson died twice and used nothing (Fortifying
+def test_the_night():
+    card = full_text().thread[0]
+    assert card.blocks[0] == (
+        "✅ Boss A (2 pulls) · ✅ Boss B · ❌ Boss C (2 wipes)\n"
+        "-# Bosses without a count died on the first pull · 13m on bosses across a 20m night"
+    )
+    assert card.blocks[1] == "**📉 Boss C progress**\nbest P2 at 30%"
+    assert card.blocks[2] == "**💔 Heartbreaker**\nBoss A wiped with the boss at **8%** in P2 before going down"
+
+
+def test_leaderboard_one_block_per_role():
+    card = full_text().thread[1]
+    assert card.blocks == [
+        "**⚔️ Damage**\n🟪 **Pumper** **94.5** 👑\n🟪 **Middling** 90.0\n🟩 **Dyer** 45.0\n⬜ **Greyson** 20.0",
+        "**💚 Healing**\n🟦 **Healz** **65.0** 👑",
+        "**🛡️ Tanks**\n⬜ **Tanky** **6.5** 👑",
+    ]
+
+
+def test_awards():
+    text = all_text(full_text())
+    assert "**🩷 Pink parse** **Pumper** · 99 on Boss A" in text
+    assert "**🦶 Kick captain** **Pumper** · 6 interrupts (next best: 2)" in text
+    assert "**🧼 Dispel machine** **Healz** · 12 dispels" in text
+    assert "**🪄 Necromancer** **Healz** · 3 battle rezzes" in text
+    assert "**🚽 Parse of shame** **Greyson** · 10 on Boss A" in text
+    assert "**🧽 Damage sponge** **Dyer** · 100M damage taken" in text
+    assert "**🛡️ Outdamaged by a tank** **Greyson** did less damage than **Tanky**" in text
+    assert "**🎯 Nemesis** **Dyer** died to Fire 3 times" in text
+    assert "**🧲 Brez magnet** **Dyer** · rezzed 3 times" in text
+    assert "**💀 Floor inspector**\n-# Deaths before the wipe was called\n**Dyer** 3 · **Greyson** 2" in text
+    # Nothing worth saying tonight: these stay silent rather than print a weak line.
+    for quiet in ("Metronome", "Rollercoaster", "Battle healer", "Canary", "Couldn't wait for loot",
+                  "Speedrunner", "Last one standing", "Wall of the night", "Raid's nemesis", "Wipe starter"):
+        assert quiet not in text, quiet
+
+
+def test_consumables_card():
+    card = full_text().thread[-1]
+    assert card.blocks == [
+        "**🔮 Tryhards**\n-# Void-Touched rune\n**Pumper** every pull · **Middling** 3 of 5\n\n"
+        "**🍺 Potion seller** **Pumper** · 6 combat potions in 5 pulls\n"
+        "**🫗 Mana chugger** **Healz** · 4 mana potions\n"
+        "**🍪 Cookie monster** **Middling** · 10 healthstones and health potions",
+        # Tanky drank none; Greyson one in 5. Healz drank mana potions, so isn't a hoarder. Dyer
+        # died 3 times but used healthstones; Greyson died twice and used nothing (Fortifying
         # Brew is a class ability, not a consumable).
-        "🪦 **Died with a healthstone in the bag** (not one healthstone or health potion all night): **Greyson** died twice",
-        "⚗️ **No flask:** **Greyson** on 2 of 5 pulls",
-        "🍗 **Forgot to eat:** **Dyer** on 2 of 5 pulls",
-        # Only Boss C's pulls count: nobody used a vantus on A or B.
-        "📜 **No vantus** (on pulls where most of the raid had one): **Greyson** all 2 pulls",
+        "**🧪 Potion hoarders**\n-# No combat potion on most of their pulls (healers: no potion of any kind)\n"
+        "**Tanky** not a single one all night · **Greyson** 4 of 5 pulls\n\n"
+        "**🪦 Died with a healthstone in the bag**\n-# Not one healthstone or health potion all night\n"
+        "**Greyson** died twice",
+        # Only Boss C's pulls count for vantus: nobody used one on A or B.
+        "**⚗️ No flask** **Greyson** 2 of 5 pulls\n**🍗 Forgot to eat** **Dyer** 2 of 5 pulls\n\n"
+        "**📜 No vantus**\n-# On pulls where most of the raid had one\n**Greyson** all 2 pulls",
     ]
 
 
 def test_healer_with_no_potions_of_any_kind_is_a_hoarder():
     data = report()
     data["casts"]["data"]["entries"] = [e for e in data["casts"]["data"]["entries"] if "Mana" not in e["name"]]
-    assert "**Healz**, no potion of any kind all night" in all_text(full_text(data))
+    assert "**Healz** no potion of any kind all night" in all_text(full_text(data))
 
 
 def test_consumables_are_retail_only():
@@ -212,38 +254,6 @@ def test_combat_potion_names_are_a_setting():
     assert "ability.id = 0" in _potion_filter(replace(SETTINGS, combat_potions=()))
 
 
-def test_the_night():
-    night = full_text().thread[0].text
-    assert "✅ Boss A, 2 pulls" in night
-    assert "✅ Boss B, first pull" in night
-    assert "❌ Boss C, 2 wipes, best P2 at 30%" in night
-    assert "💔 **Heartbreaker:** Boss A wiped with the boss at **8%** in P2, before going down" in night
-
-
-def test_leaderboard_uses_wcl_colours_and_crowns_the_top():
-    board = full_text().thread[1].text.splitlines()
-    assert board[1] == "⚔️ 👑 🟪 **Pumper** 94.5 · **Middling** 90.0 · 🟩 **Dyer** 45.0 · ⬜ **Greyson** 20.0"
-    assert board[2] == "💚 👑 🟦 **Healz** 65.0"
-    assert board[3] == "🛡️ 👑 ⬜ **Tanky** 6.5"
-
-
-def test_awards():
-    text = all_text(full_text())
-    assert "🩷 **Pink parse:** **Pumper**, 99 on Boss A" in text
-    assert "🦶 **Kick captain:** **Pumper**, 6 interrupts (next best: 2)" in text
-    assert "🧼 **Dispel machine:** **Healz**, 12 dispels" in text
-    assert "🪄 **Necromancer:** **Healz**, 3 battle rezzes" in text
-    assert "🚽 **Parse of shame:** **Greyson**, 10 on Boss A" in text
-    assert "🧽 **Damage sponge:** **Dyer**, 100M damage taken" in text
-    assert "🛡️ **Outdamaged by a tank:** **Greyson** did less damage than **Tanky**" in text
-    assert "🎯 **Nemesis:** **Dyer** died to Fire 3 times" in text
-    assert "🧲 **Brez magnet:** **Dyer**, rezzed 3 times" in text
-    # Nothing worth saying tonight: these stay silent rather than print a weak line.
-    for quiet in ("Metronome", "Rollercoaster", "Battle healer", "Canary", "Couldn't wait for loot",
-                  "Speedrunner", "Last one standing", "Wall of the night", "Raid's nemesis", "Wipe starter"):
-        assert quiet not in text, quiet
-
-
 def test_prog_night_swaps_parses_for_throughput():
     data = report()
     for f in data["fights"]:
@@ -251,11 +261,13 @@ def test_prog_night_swaps_parses_for_throughput():
         f["bossPercentage"] = f.get("bossPercentage") or 50
     data["dpsRankings"] = data["hpsRankings"] = {"data": []}
     r = full_text(data)
-    assert r.headline.startswith("📜 **Prog report** · Liberation of Undermine · Heroic")
-    assert "no kill yet" in r.headline
-    assert "🏆 **Top DPS:** **Pumper** 112k · **Top healer:** **Healz** 62k HPS" in r.headline
-    assert "90+" not in r.headline and "Grey" not in r.headline
-    assert r.thread[1].text.startswith("📊 **Throughput** (raw numbers, since wipes don't get parses)")
+    assert r.headline.title == "Prog report · Liberation of Undermine"
+    assert r.headline.accent == 0xE67E22  # orange for a prog night
+    assert "no kill yet" in r.headline.subtitle
+    assert "**🏆 Top DPS** **Pumper** 112k\n**💚 Top healer** **Healz** 62k HPS" in r.headline.blocks[0]
+    assert "90+" not in card_text(r.headline) and "Grey" not in card_text(r.headline)
+    board = r.thread[1]
+    assert (board.title, board.subtitle) == ("📊 Throughput", "Raw numbers: wipes don't get parses")
     assert "Pink parse" not in all_text(r)
 
 
@@ -264,9 +276,18 @@ def test_single_boss_prog_night_headline():
     data["fights"] = [f for f in data["fights"] if f.get("encounterID") == 3011]
     data["dpsRankings"] = data["hpsRankings"] = {"data": []}
     r = full_text(data)
-    assert r.headline.startswith("📜 **Prog report** · Boss C · Heroic")
-    assert "📈 **Best pull:** P2 at 30% (the last pull of the night)" in r.headline
+    assert r.headline.title == "Prog report · Boss C"
+    # On a prog night the best pull leads the headline.
+    assert r.headline.blocks[0].startswith("**📈 Best pull** P2 at 30% · the last pull of the night")
     assert r.thread_title == "Prog report · Sep 17 · Boss C"
+
+
+def test_featured_boss_for_the_thumbnail():
+    from bot.render import featured_boss
+    assert featured_boss(analyze(report(), SETTINGS)) == 3010  # the last boss killed
+    data = report()
+    data["fights"] = [f for f in data["fights"] if f.get("encounterID") == 3011]
+    assert featured_boss(analyze(data, SETTINGS)) == 3011  # the prog boss
 
 
 class FakeHistory:
@@ -287,10 +308,10 @@ def test_history_adds_progress_and_streaks():
         streaks={("floor", "Dyer"): 2, ("grey", "Greyson"): 1, ("sponge", "Dyer"): 1},
     )
     text = all_text(full_text(history=history))
-    assert "📈 **Boss C:** 2 wipes, best P2 at 30% · last raid's best: P3 at 44%" in text
-    assert "💀 **Floor inspector:** **Dyer** (3 deaths, 3 raids running)" in text
-    assert "🗑️ **Grey:** **Greyson** (damage 20.0, 2 raids running)" in text
-    assert "🧽 **Damage sponge:** **Dyer**, 100M damage taken (2 raids running)" in text
+    assert "**📈 Boss C** 2 wipes · best P2 at 30% · last raid's best: P3 at 44%" in text
+    assert "**💀 Floor inspector** **Dyer** 3 deaths (3 raids running)" in text
+    assert "**🗑️ Grey** **Greyson** damage 20.0 (2 raids running)" in text
+    assert "**🧽 Damage sponge** **Dyer** · 100M damage taken (2 raids running)" in text
 
 
 def test_thread_title_uses_the_guilds_timezone():
@@ -301,15 +322,40 @@ def test_thread_title_uses_the_guilds_timezone():
 
 def test_unlinked_nudge_goes_at_the_end_of_the_thread():
     r = full_text(links={n: i for i, n in enumerate(["Tanky", "Healz", "Pumper", "Greyson", "Dyer"], 1)})
-    assert r.thread[-1].text.endswith("-# Not linked: Middling. Use `/link` so the bot can tag you.")
-    assert "Not linked" not in r.headline
+    assert r.thread[-1].footer == "Not linked: Middling. An admin can /link them so the bot can tag them."
+    assert "Not linked" not in card_text(r.headline)
 
 
 def test_leaderboard_ping_setting():
     night = analyze(report(), SETTINGS)
     lines = build_lines(night, SETTINGS)
     quiet = render_report(night, lines, URL, lambda c: None, thread_ping_everyone=False)
-    assert [m.pings for m in quiet.thread] == [True, False, True, True, True, True]
+    assert [c.pings for c in quiet.thread] == [True, False, True, True, True, True]
+
+
+def test_card_text_is_the_plain_fallback():
+    text = card_text(full_text().headline)
+    assert text.startswith("### Raid report · Liberation of Undermine\n-# Heroic")
+    assert text.endswith(f"[View log on Warcraft Logs](<{URL}>)")
+
+
+def test_oversized_cards_continue_in_a_second_card():
+    card = Card("🧪 Consumables", 1, [f"block {i} " + "x" * 900 for i in range(6)], footer="note", button=("b", "u"))
+    parts = split_card(card)
+    assert len(parts) == 2
+    assert parts[0].title == "🧪 Consumables" and parts[1].title == "🧪 Consumables (continued)"
+    assert parts[0].footer is None and parts[1].footer == "note"  # small print stays at the very end
+    assert all(sum(len(b) for b in p.blocks) < 3800 for p in parts)
+    assert [b for p in parts for b in p.blocks] == card.blocks
+    many = split_card(Card("t", 1, ["x"] * 30))
+    assert all(len(p.blocks) <= 15 for p in many)  # keeps well inside Discord's 40 parts per card
+
+
+def test_one_giant_list_is_split_between_names():
+    names = " · ".join(f"**Player{i}** 1" for i in range(400))
+    parts = split_card(Card("t", 1, [names]))
+    assert len(parts) >= 2 and all(len(b) < 3800 for p in parts for b in p.blocks)
+    assert all(not b.startswith(" ·") for p in parts for b in p.blocks)
 
 
 def test_fmt_health():
@@ -317,12 +363,6 @@ def test_fmt_health():
     assert fmt_health(44.2, 3) == "P3 at 44%"
     assert fmt_health(0.62, 1) == "0.6%"
     assert fmt_health(30, None) == "30%"
-
-
-def test_group_lines_share_one_line():
-    from bot.render import _Names, _text
-    lines = [Line("headline", ["a"], group="g"), Line("headline", ["b"], group="g"), Line("headline", ["c"])]
-    assert _text(lines, _Names(lambda c: None)) == ["a · b", "c"]
 
 
 def test_split_message_respects_limit():

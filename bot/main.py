@@ -1,4 +1,4 @@
-"""The Discord side: watches the logs channel, runs slash commands, posts reports."""
+"""The Discord side: watches the logs channel, runs slash commands, posts reports as cards."""
 
 import asyncio
 import logging
@@ -7,12 +7,12 @@ from dataclasses import dataclass
 
 import discord
 import httpx
-from discord import app_commands
+from discord import app_commands, ui
 
 from .awards import Line, boss_results, build_lines, winners_by_key
 from .config import Config
 from .recap import Char, Night, analyze, norm_realm
-from .render import Rendered, mentioned_ids, render_report, split_message
+from .render import Card, Rendered, card_text, featured_boss, mentioned_ids, render_report, split_message
 from .store import PendingReport, Store
 from .watch import check_ready
 from .wcl import ReportRef, ReportUnavailable, WCLClient, WCLError, find_report_links
@@ -20,6 +20,7 @@ from .wcl import ReportRef, ReportUnavailable, WCLClient, WCLError, find_report_
 log = logging.getLogger("livilogs")
 
 NO_PINGS = discord.AllowedMentions.none()
+BOSS_ICON = "https://assets.rpglogs.com/img/warcraft/bosses/{}-icon.jpg"
 
 
 def pings_for(user_ids) -> discord.AllowedMentions:
@@ -27,6 +28,7 @@ def pings_for(user_ids) -> discord.AllowedMentions:
     return discord.AllowedMentions(
         everyone=False, roles=False, replied_user=False, users=[discord.Object(i) for i in user_ids]
     )
+
 
 PRIVATE_LOG = (
     "❌ I can't read <{url}>. It's probably uploaded as **Private**; "
@@ -40,6 +42,17 @@ def parse_character(text: str, realm: str | None) -> tuple[str, str | None]:
     return name.strip(), (realm or rest).strip() or None
 
 
+def parse_characters(text: str, realm: str | None) -> list[tuple[str, str | None]]:
+    """'Bob, Bobalt-Area 52' -> [('Bob', realm), ('Bobalt', 'Area 52')]: a realm typed with a
+    character wins; `realm` fills in for the rest."""
+    out = []
+    for piece in text.split(","):
+        if piece.strip():
+            name, _, rest = piece.strip().partition("-")
+            out.append((name.strip(), rest.strip() or (realm or "").strip() or None))
+    return out
+
+
 def message_text(message: discord.Message) -> str:
     """Content plus embeds, so links posted by other bots or webhooks are found too."""
     parts = [message.content]
@@ -49,6 +62,25 @@ def message_text(message: discord.Message) -> str:
         if embed.author:
             parts.append(embed.author.url)
     return "\n".join(p for p in parts if p)
+
+
+def card_view(card: Card) -> ui.LayoutView:
+    """A card as a Discord components-v2 container: coloured edge, title (with the boss picture
+    beside it if there is one), a divider between blocks, small print and a link button."""
+    view = ui.LayoutView(timeout=None)
+    header = f"### {card.title}" + (f"\n-# {card.subtitle}" if card.subtitle else "")
+    items: list[ui.Item] = [
+        ui.Section(ui.TextDisplay(header), accessory=ui.Thumbnail(card.thumbnail)) if card.thumbnail
+        else ui.TextDisplay(header)
+    ]
+    for block in card.blocks:
+        items += [ui.Separator(), ui.TextDisplay(block)]
+    if card.footer:
+        items.append(ui.TextDisplay(f"-# {card.footer}"))
+    if card.button:
+        items.append(ui.ActionRow(ui.Button(style=discord.ButtonStyle.link, label=card.button[0], url=card.button[1])))
+    view.add_item(ui.Container(*items, accent_colour=card.accent))
+    return view
 
 
 @dataclass
@@ -71,6 +103,7 @@ class RecapBot(discord.Client):
             self.tree.add_command(command)
         self._busy: set[ReportRef] = set()
         self._tasks: set[asyncio.Task] = set()  # keeps background checks from being garbage-collected
+        self._icons: dict[int, bool] = {}  # boss id -> WCL has a picture for it
 
     async def setup_hook(self) -> None:
         if self.config.guild_id:
@@ -90,17 +123,8 @@ class RecapBot(discord.Client):
         await self.wcl.close()
         await super().close()
 
-    def is_officer(self, member) -> bool:
-        if not isinstance(member, discord.Member):
-            return False
-        if member.guild_permissions.manage_guild:
-            return True
-        return self.config.officer_role_id is not None and any(
-            role.id == self.config.officer_role_id for role in member.roles
-        )
-
     def resolve_character(self, name: str, realm: str | None) -> Char | str:
-        """A Char, or an error message saying what's missing."""
+        """A Char, or a message saying what's missing."""
         if not name:
             return "Give a character name."
         seen = self.store.seen_named(name)
@@ -113,10 +137,10 @@ class RecapBot(discord.Client):
             return seen[0]
         if len(seen) > 1:
             realms = ", ".join(c.realm for c in seen)
-            return f"I've seen **{name}** on more than one realm ({realms}). Add the realm."
+            return f"I've seen **{name}** on more than one realm ({realms}). Type it as {name}-Realm."
         if self.config.default_realm:
             return Char(name, self.config.default_realm)
-        return f"I haven't seen **{name}** in a log yet, so add the realm: `/link {name} <realm>`."
+        return f"I haven't seen **{name}** in a log yet, so type it with the realm: {name}-Realm."
 
     # --- watching the channel ----------------------------------------------------------------
 
@@ -212,9 +236,20 @@ class RecapBot(discord.Client):
         lines = build_lines(night, self.config.recap, self.store)  # the store remembers past nights
         self.store.remember(night.roster)
         rendered = render_report(
-            night, lines, ref.url, self.store.user_for, self.config.timezone, self.config.thread_ping_everyone
+            night, lines, ref.url, self.store.user_for, self.config.timezone, self.config.thread_ping_everyone,
+            thumbnail=await self.boss_picture(night),
         )
         return Built(rendered, night, lines)
+
+    async def boss_picture(self, night: Night) -> str | None:
+        """WCL's picture of the night's featured boss, if WCL has one (checked once per boss, so a
+        missing picture never breaks a card)."""
+        boss = featured_boss(night)
+        if boss is None:
+            return None
+        if boss not in self._icons:
+            self._icons[boss] = await self.wcl.image_exists(BOSS_ICON.format(boss))
+        return BOSS_ICON.format(boss) if self._icons[boss] else None
 
     def record(self, ref: ReportRef, built: Built, channel_id: int | None) -> None:
         """Remember the night for next time ("last raid's best", "3 raids running")."""
@@ -222,7 +257,8 @@ class RecapBot(discord.Client):
         self.store.mark_posted(ref, built.night.roster, channel_id)
 
     async def post_report(self, channel_id: int, reply_to: int | None, rendered: Rendered) -> None:
-        """Headline in the channel (as a reply to the log link), full report in a thread under it.
+        """Headline card in the channel (as a reply to the log link), one card per section in a
+        thread under it.
 
         The headline pings everyone it names. In the thread each person is pinged once, on their
         first mention, so being in five callouts doesn't mean five notifications.
@@ -232,11 +268,8 @@ class RecapBot(discord.Client):
             discord.MessageReference(message_id=reply_to, channel_id=channel_id, fail_if_not_exists=False)
             if reply_to else None
         )
-        headline = None
-        for i, chunk in enumerate(split_message(rendered.headline)):
-            sent = await channel.send(chunk, reference=reference if i == 0 else None,
-                                      allowed_mentions=pings_for(mentioned_ids(chunk)))
-            headline = headline or sent
+        headline = await self.send_card(channel, rendered.headline, mentioned_ids(card_text(rendered.headline)),
+                                        reference)
         if not rendered.thread:
             return
 
@@ -247,11 +280,27 @@ class RecapBot(discord.Client):
             except discord.HTTPException as e:
                 log.warning("Couldn't open a thread (%s); posting the report in the channel instead", e)
         pinged: set[int] = set()
-        for message in rendered.thread:
-            for chunk in split_message(message.text):
-                ids = [i for i in mentioned_ids(chunk) if i not in pinged] if message.pings else []
-                await target.send(chunk, allowed_mentions=pings_for(ids))
-                pinged.update(ids)
+        for card in rendered.thread:
+            ids = [i for i in mentioned_ids(card_text(card)) if i not in pinged] if card.pings else []
+            await self.send_card(target, card, ids)
+            pinged.update(ids)
+
+    async def send_card(self, target, card: Card, ping_ids: list[int], reference=None) -> discord.Message:
+        try:
+            return await target.send(view=card_view(card), reference=reference, allowed_mentions=pings_for(ping_ids))
+        except discord.HTTPException as e:
+            if e.status != 400:
+                raise
+            # Discord refused the card layout itself (a malformed part, a limit): never lose the
+            # report over it, send the same content as ordinary messages.
+            log.warning("Discord refused a card (%s); sending it as plain text", e)
+            first = None
+            for i, chunk in enumerate(split_message(card_text(card))):
+                ids = [u for u in mentioned_ids(chunk) if u in ping_ids]
+                sent = await target.send(chunk, reference=reference if i == 0 else None,
+                                         allowed_mentions=pings_for(ids))
+                first = first or sent
+            return first
 
     async def send(self, channel_id: int, reply_to: int | None, text: str) -> None:
         """Plain notices (errors, "can't read this log"). They ping nobody."""
@@ -270,7 +319,7 @@ class RecapBot(discord.Client):
             if add:
                 await message.add_reaction(add)
         except (discord.HTTPException, AttributeError):
-            pass  # reactions are a nicety; missing permission shouldn't stop the recap
+            pass  # reactions are a nicety; missing permission shouldn't stop the report
 
     async def _react_done(self, pending: PendingReport, emoji: str) -> None:
         if pending.source_message_id:
@@ -283,70 +332,88 @@ def _bot(interaction: discord.Interaction) -> RecapBot:
     return interaction.client  # type: ignore[return-value]
 
 
-async def _character_autocomplete(interaction: discord.Interaction, current: str):
-    chars = _bot(interaction).store.search_seen(current.partition("-")[0])
-    return [app_commands.Choice(name=c.label, value=c.label) for c in chars]
+async def _characters_autocomplete(interaction: discord.Interaction, current: str):
+    """Completes the last name in a comma-separated list from characters seen in past logs."""
+    done, _, last = current.rpartition(",")
+    prefix = f"{done.strip()}, " if done.strip() else ""
+    chars = _bot(interaction).store.search_seen(last.strip().partition("-")[0])
+    values = [prefix + c.label for c in chars]
+    return [app_commands.Choice(name=v, value=v) for v in values if len(v) <= 100]
 
 
-@app_commands.command(name="link", description="Link a WoW character to a Discord member so recaps can tag them")
+async def _linked_autocomplete(interaction: discord.Interaction, current: str):
+    links = _bot(interaction).store.search_links(current.partition("-")[0])
+    return [app_commands.Choice(name=c.label, value=c.label) for c, _ in links]
+
+
+# Linking is for admins: Discord hides these commands from anyone without Manage Server. A server
+# admin can let another role use them under Server Settings -> Integrations -> LiviLogs.
+@app_commands.command(name="link", description="Link WoW characters to a Discord member (admins)")
 @app_commands.describe(
-    character="Character name, or Name-Realm",
-    realm="Realm. Optional if the bot has already seen the character in a log",
-    member="Officers only: link the character to someone else",
+    member="Who the characters belong to",
+    characters="One or more characters, comma-separated: Name or Name-Realm",
+    realm="Realm for any character typed without one. Optional if the bot has seen them in a log",
 )
-@app_commands.autocomplete(character=_character_autocomplete)
+@app_commands.autocomplete(characters=_characters_autocomplete)
+@app_commands.default_permissions(manage_guild=True)
 @app_commands.guild_only()
 async def link_command(
     interaction: discord.Interaction,
-    character: str,
+    member: discord.Member,
+    characters: str,
     realm: str | None = None,
-    member: discord.Member | None = None,
 ):
     bot = _bot(interaction)
-    target = member or interaction.user
-    officer = bot.is_officer(interaction.user)
-    if target.id != interaction.user.id and not officer:
-        await interaction.response.send_message("Only officers can link characters for other people.", ephemeral=True)
-        return
-    char = bot.resolve_character(*parse_character(character, realm))
-    if isinstance(char, str):
-        await interaction.response.send_message(char, ephemeral=True)
-        return
-    owner = bot.store.user_for(char)
-    if owner and owner != target.id and not officer:
-        await interaction.response.send_message(
-            f"**{char.label}** is already linked to <@{owner}>. Ask an officer to move it.", ephemeral=True
-        )
-        return
-    bot.store.link(char, target.id, interaction.user.id)
-    await interaction.response.send_message(f"Linked **{char.label}** to {target.mention}.", ephemeral=True)
+    linked: list[Char] = []
+    moved: list[tuple[Char, int]] = []
+    problems: list[str] = []
+    for name, char_realm in parse_characters(characters, realm):
+        char = bot.resolve_character(name, char_realm)
+        if isinstance(char, str):
+            problems.append(char)
+            continue
+        owner = bot.store.user_for(char)
+        bot.store.link(char, member.id, interaction.user.id)
+        if owner and owner != member.id:
+            moved.append((char, owner))
+        else:
+            linked.append(char)
+
+    lines = []
+    if linked:
+        lines.append(f"Linked to {member.mention}: " + ", ".join(f"**{c.label}**" for c in linked))
+    lines += [f"Moved **{c.label}** from <@{old}> to {member.mention}" for c, old in moved]
+    lines += problems
+    if linked or moved:
+        mine = bot.store.characters_of(member.id)
+        lines.append(f"-# {member.display_name}'s characters: " + ", ".join(c.label for c in mine))
+    await interaction.response.send_message("\n".join(lines) or "No characters given.", ephemeral=True,
+                                            allowed_mentions=NO_PINGS)
 
 
-@app_commands.command(name="unlink", description="Remove a character link")
+@app_commands.command(name="unlink", description="Remove a character link (admins)")
 @app_commands.describe(character="Character name, or Name-Realm", realm="Realm, if the name is linked on more than one")
+@app_commands.autocomplete(character=_linked_autocomplete)
+@app_commands.default_permissions(manage_guild=True)
 @app_commands.guild_only()
 async def unlink_command(interaction: discord.Interaction, character: str, realm: str | None = None):
     bot = _bot(interaction)
     name, realm = parse_character(character, realm)
-    officer = bot.is_officer(interaction.user)
-    matches = [
-        (c, uid) for c, uid in bot.store.links_named(name)
-        if (not realm or norm_realm(c.realm) == norm_realm(realm)) and (officer or uid == interaction.user.id)
-    ]
+    matches = [(c, uid) for c, uid in bot.store.links_named(name)
+               if not realm or norm_realm(c.realm) == norm_realm(realm)]
     if not matches:
-        await interaction.response.send_message(f"No link for **{character}** that you can remove.", ephemeral=True)
-        return
-    if len(matches) > 1:
-        realms = ", ".join(c.realm for c, _ in matches)
-        await interaction.response.send_message(f"**{name}** is linked on {realms}. Add the realm.", ephemeral=True)
-        return
-    char, uid = matches[0]
-    bot.store.unlink(char)
-    await interaction.response.send_message(f"Unlinked **{char.label}** from <@{uid}>.", ephemeral=True)
+        text = f"**{character}** isn't linked to anyone."
+    elif len(matches) > 1:
+        text = f"**{name}** is linked on {', '.join(c.realm for c, _ in matches)}. Type it as {name}-Realm."
+    else:
+        char, uid = matches[0]
+        bot.store.unlink(char)
+        text = f"Unlinked **{char.label}** from <@{uid}>."
+    await interaction.response.send_message(text, ephemeral=True, allowed_mentions=NO_PINGS)
 
 
-@app_commands.command(name="links", description="Show someone's linked characters, or who from the last recap isn't linked")
-@app_commands.describe(member="Whose characters to show. Leave empty for unlinked characters from the last recap")
+@app_commands.command(name="links", description="Show someone's linked characters, or who from the last report isn't linked")
+@app_commands.describe(member="Whose characters to show. Leave empty for unlinked characters from the last report")
 @app_commands.guild_only()
 async def links_command(interaction: discord.Interaction, member: discord.Member | None = None):
     bot = _bot(interaction)
@@ -358,15 +425,16 @@ async def links_command(interaction: discord.Interaction, member: discord.Member
         last = bot.store.last_recap_characters()
         unlinked = [c for c in last if bot.store.user_for(c) is None]
         if not last:
-            text = "No recap has been posted yet."
+            text = "No report has been posted yet."
         elif unlinked:
-            text = "Not linked from the last recap: " + ", ".join(f"**{c.label}**" for c in unlinked)
+            text = ("Not linked from the last report: " + ", ".join(f"**{c.label}**" for c in unlinked)
+                    + "\n-# An admin can link them with /link.")
         else:
-            text = "Everyone from the last recap is linked."
+            text = "Everyone from the last report is linked."
         mine = bot.store.characters_of(interaction.user.id)
         if mine:
             text += "\nYours: " + ", ".join(f"**{c.label}**" for c in mine)
-    await interaction.response.send_message(text, ephemeral=True)
+    await interaction.response.send_message(text, ephemeral=True, allowed_mentions=NO_PINGS)
 
 
 @app_commands.command(name="recap", description="Post the raid report for a Warcraft Logs link right now")

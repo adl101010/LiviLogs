@@ -20,7 +20,7 @@ from pathlib import Path
 from bot.awards import boss_results, build_lines, winners_by_key
 from bot.config import RecapSettings, _zone
 from bot.recap import analyze
-from bot.render import render_report
+from bot.render import card_text, render_report
 from bot.store import Store
 from bot.wcl import WCLClient, find_report_links
 
@@ -74,10 +74,10 @@ async def main(urls: list[str], show_compare: bool) -> None:
             history.save_history(ref, night.start_ms, boss_results(night), winners_by_key(lines))
 
             print(f"\n{'=' * 100}\n{ref.url}  (thread: {rendered.thread_title})\n{'=' * 100}")
-            print(rendered.headline)
-            for message in rendered.thread:
-                print(f"\n----- thread message ({len(message.text)} chars) -----")
-                print(message.text)
+            print(card_text(rendered.headline))
+            for card in rendered.thread:
+                print(f"\n----- thread card ({len(card_text(card))} chars) -----")
+                print(card_text(card))
             if show_compare:
                 await compare(wcl, ref, settings)
         print(f"\nRaw JSON saved under {OUT}")

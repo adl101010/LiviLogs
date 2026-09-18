@@ -16,18 +16,26 @@ LINK = "https://www.warcraftlogs.com/reports/AbCdEf1234567890"
 CHANNEL = 10
 
 
+def _content(content, view):
+    """What a message says: its text, or the text of every card part."""
+    if view is None:
+        return content
+    return "\n".join(item.content for item in view.walk_children() if hasattr(item, "content"))
+
+
 class FakeThread:
     def __init__(self, name):
         self.name = name
         self.sent = []
 
-    async def send(self, content, allowed_mentions=None, **_):
-        self.sent.append(SimpleNamespace(content=content, allowed=allowed_mentions))
+    async def send(self, content=None, view=None, allowed_mentions=None, **_):
+        self.sent.append(SimpleNamespace(content=_content(content, view), view=view, allowed=allowed_mentions))
 
 
 class FakeMessage:
-    def __init__(self, channel, content, reference, allowed):
+    def __init__(self, channel, content, reference, allowed, view=None):
         self.channel, self.content, self.reference, self.allowed = channel, content, reference, allowed
+        self.view = view
 
     async def create_thread(self, name, auto_archive_duration=None):
         self.channel.thread = FakeThread(name)
@@ -37,14 +45,18 @@ class FakeMessage:
 class FakeChannel:
     id = CHANNEL
 
-    def __init__(self, can_thread=True):
+    def __init__(self, can_thread=True, refuse_cards=False):
         self.sent = []
         self.reactions = []
         self.thread = None
         self.can_thread = can_thread
+        self.refuse_cards = refuse_cards
 
-    async def send(self, content, reference=None, allowed_mentions=None, **_):
-        message = FakeMessage(self, content, reference, allowed_mentions)
+    async def send(self, content=None, reference=None, allowed_mentions=None, view=None, **_):
+        if view is not None and self.refuse_cards:
+            import discord
+            raise discord.HTTPException(SimpleNamespace(status=400, reason="Bad Request"), "Invalid Form Body")
+        message = FakeMessage(self, _content(content, view), reference, allowed_mentions, view)
         if not self.can_thread:
             async def refuse(*a, **k):
                 import discord
@@ -79,12 +91,16 @@ class FakeWCL:
     async def report_full(self, ref, settings):
         return report()
 
+    async def image_exists(self, url):
+        self.checked = url
+        return True
+
     async def close(self):
         pass
 
 
 def make_bot(wcl, channel=None):
-    config = Config("token", frozenset({CHANNEL}), None, None, None, ":memory:", 5, 20, 8,
+    config = Config("token", frozenset({CHANNEL}), None, None, ":memory:", 5, 20, 8,
                     ZoneInfo("UTC"), True, RecapSettings())
     bot = RecapBot(config)
     bot.wcl = wcl
@@ -118,7 +134,10 @@ def test_finished_log_posts_headline_and_thread():
 
     assert len(channel.sent) == 1
     headline = channel.sent[0]
-    assert headline.content.startswith("📜 **Raid report**")
+    assert headline.view is not None  # a card, not plain text
+    assert headline.content.startswith("### Raid report · Liberation of Undermine")
+    pictures = [i.media.url for i in headline.view.walk_children() if type(i).__name__ == "Thumbnail"]
+    assert pictures == ["https://assets.rpglogs.com/img/warcraft/bosses/3010-icon.jpg"]  # last boss killed
     assert headline.reference.message_id == 500  # replies to the link
     assert pinged(headline.allowed) == [111, 555]  # everyone named in the headline
     assert headline.allowed.everyone is False and headline.allowed.roles is False
@@ -126,8 +145,8 @@ def test_finished_log_posts_headline_and_thread():
     thread = channel.thread
     assert thread.name == "Raid report · Sep 17 · Liberation of Undermine"
     assert [m.content.splitlines()[0] for m in thread.sent] == [
-        "🗺️ **The night**", "📊 **Parses**", "🌟 **Highlights**", "🤡 **Lowlights**", "💀 **Deaths**",
-        "🧪 **Consumables**",
+        "### 🗺️ The night", "### 📊 Parses", "### 🌟 Highlights", "### 🤡 Lowlights", "### 💀 Deaths",
+        "### 🧪 Consumables",
     ]
     # In the thread each person is pinged once, on their first mention.
     pings = [pinged(m.allowed) for m in thread.sent]
@@ -152,7 +171,17 @@ def test_without_thread_permission_the_report_goes_in_the_channel():
     bot, channel = make_bot(FakeWCL(), FakeChannel(can_thread=False))
     post_link(bot, channel)
     assert len(channel.sent) == 7  # headline + 6 sections
-    assert channel.sent[1].content.startswith("🗺️ **The night**")
+    assert channel.sent[1].content.startswith("### 🗺️ The night")
+
+
+def test_a_refused_card_is_sent_as_plain_text_instead():
+    bot, channel = make_bot(FakeWCL(), FakeChannel(refuse_cards=True))
+    bot.store.link(Char("Pumper", "Area 52"), 111, 111)
+    post_link(bot, channel)
+    headline = channel.sent[0]
+    assert headline.view is None and headline.content.startswith("### Raid report")
+    assert pinged(headline.allowed) == [111]  # pings still go out
+    assert "[View log on Warcraft Logs]" in headline.content
 
 
 def test_live_log_waits():

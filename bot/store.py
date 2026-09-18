@@ -139,6 +139,13 @@ class Store:
         ).fetchall()
         return [Char(r["name"], r["realm"]) for r in rows]
 
+    def search_links(self, text: str, limit: int = 25) -> list[tuple[Char, int]]:
+        rows = self._db.execute(
+            "SELECT name, realm, discord_user_id FROM links WHERE name_norm LIKE ? ORDER BY name LIMIT ?",
+            (norm_name(text).replace("%", "").replace("_", "") + "%", limit),
+        ).fetchall()
+        return [(Char(r["name"], r["realm"]), r["discord_user_id"]) for r in rows]
+
     def links_named(self, name: str) -> list[tuple[Char, int]]:
         rows = self._db.execute(
             "SELECT name, realm, discord_user_id FROM links WHERE name_norm = ?", (norm_name(name),)

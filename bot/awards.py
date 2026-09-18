@@ -392,6 +392,18 @@ class Builder:
             if not pull.kill and deaths:
                 wipes_with_deaths += 1
                 last[deaths[-1].char] += 1
+        # PI's favourite: whoever a priest kept giving Power Infusion to (priests on themselves don't count).
+        received = Counter()
+        for (giver, receiver), times_given in night.power_infusion.items():
+            received[receiver] += times_given
+        chars, n = leaders(received, 3, max_names=1)
+        if chars:
+            givers = Counter({g: t for (g, r), t in night.power_infusion.items() if r == chars[0]})
+            giver, from_them = givers.most_common(1)[0]
+            source: list[Part] = [" from ", giver] if from_them == n else [" from ", giver, " and others"]
+            self.add(HIGHLIGHTS, [chars[0], " · got Power Infusion", *source, f" {times(int(n))}",
+                                  self.running("pi", chars[0])], "pi", chars, title="💜 PI's favorite")
+
         chars, n = leaders(last, 3, max_names=1)
         if chars and wipes_with_deaths >= 3:
             self.add(HIGHLIGHTS, [chars[0], f" · last to die on {int(n)} of {wipes_with_deaths} wipes",
@@ -508,6 +520,12 @@ class Builder:
             self.add(DEATHS, [*joined(chars), f" · rezzed {times(int(n))}{each}",
                               self.running("brez_magnet", chars[0]) if len(chars) == 1 else ""],
                      "brez_magnet", chars, title="🧲 Brez magnet")
+
+        # Ghost: the most time spent dead, from each death until a battle rez or the end of the pull.
+        chars, seconds = leaders(night.dead_seconds, 180, max_names=1)
+        if chars:
+            self.add(DEATHS, [chars[0], f" · spent {fmt_duration(seconds)} dead",
+                              self.running("ghost", chars[0])], "ghost", chars, title="👻 Ghost")
 
         early = Counter()
         starts = {p.id: p.start for p in night.pulls}

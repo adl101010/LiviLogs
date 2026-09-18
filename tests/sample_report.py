@@ -177,10 +177,12 @@ def report():
         ],
         "resurrects": [
             {"type": "resurrect", "sourceID": 2, "targetID": 5, "fight": 1},
-            {"type": "resurrect", "sourceID": 2, "targetID": 5, "fight": 2},
+            {"type": "resurrect", "sourceID": 2, "targetID": 5, "fight": 2, "timestamp": 250_000},
             {"type": "resurrect", "sourceID": 2, "targetID": 5, "fight": 5},
         ],
         "combatantInfo": [_snapshot(pid, f) for f in BOSS_PULLS for pid in RAID],
+        "powerInfusion": [{"type": "applybuff", "sourceID": 2, "targetID": 3, "fight": f} for f in (1, 2, 3, 5)]
+                         + [{"type": "applybuff", "sourceID": 2, "targetID": 2, "fight": f} for f in BOSS_PULLS],
         "potions": _potions(),
         "casts": _cast_table(),
     }

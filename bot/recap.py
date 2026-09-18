@@ -165,6 +165,8 @@ class Night:
     casts_known: bool = False  # False: no casts data, so "never used a healthstone" can't be judged
     health_items: Counter = field(default_factory=Counter)  # healthstones and health potions
     mana_potions: Counter = field(default_factory=Counter)
+    dead_seconds: Counter = field(default_factory=Counter)  # time spent dead in boss pulls
+    power_infusion: Counter = field(default_factory=Counter)  # (giver, receiver) -> times, self-casts excluded
 
     @property
     def has_parses(self) -> bool:
@@ -475,6 +477,41 @@ def _consumable_casts(report: dict, players: dict[int, Char], extra: tuple[str, 
     return health, mana
 
 
+def _time_dead(report: dict, players: dict[int, Char], pulls: list[Pull],
+               deaths: dict[int, list[Death]]) -> Counter:
+    """Seconds each player spent dead: from each death until a battle rez or the end of the pull."""
+    ends = {p.id: p.end for p in pulls}
+    rezzes: dict[tuple[int, Char], list[int]] = defaultdict(list)
+    events = report.get("resurrects")
+    for e in events if isinstance(events, list) else []:
+        char = players.get(e.get("targetID"))
+        if char and isinstance(e.get("timestamp"), (int, float)):
+            rezzes[(e.get("fight"), char)].append(e["timestamp"])
+    dead: Counter = Counter()
+    for pull_id, pull_deaths in deaths.items():
+        if pull_id not in ends:
+            continue
+        back_at: dict[Char, float] = {}  # still dead until this time (guards against double deaths)
+        for d in pull_deaths:
+            if d.time < back_at.get(d.char, -1):
+                continue
+            later = [t for t in rezzes[(pull_id, d.char)] if t > d.time]
+            revived = min(later) if later else ends[pull_id]
+            back_at[d.char] = revived
+            dead[d.char] += max(0, revived - d.time) / 1000
+    return dead
+
+
+def _power_infusion(report: dict, players: dict[int, Char], pull_ids: set[int]) -> Counter:
+    given: Counter = Counter()
+    events = report.get("powerInfusion")
+    for e in events if isinstance(events, list) else []:
+        giver, receiver = players.get(e.get("sourceID")), players.get(e.get("targetID"))
+        if giver and receiver and giver != receiver and e.get("fight") in pull_ids:
+            given[(giver, receiver)] += 1
+    return given
+
+
 def _resurrects(report: dict, players: dict[int, Char], pull_ids: set[int]) -> tuple[Counter, Counter]:
     brezzed: Counter = Counter()
     given: Counter = Counter()
@@ -554,4 +591,6 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
         casts_known="casts" in report,
         health_items=health,
         mana_potions=mana,
+        dead_seconds=_time_dead(report, players, pulls, deaths),
+        power_infusion=_power_infusion(report, players, pull_ids),
     )

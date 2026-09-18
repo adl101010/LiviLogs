@@ -101,6 +101,10 @@ query Recap($code: String!, $deathsKillType: KillType) {
         data nextPageTimestamp
       }
       casts: table(dataType: Casts, viewBy: Ability, %(night)s)
+      powerInfusion: events(filterExpression: "type = 'applybuff' and ability.name = 'Power Infusion'", %(night)s,
+                            limit: 10000) {
+        data nextPageTimestamp
+      }
     }
   }
 }
@@ -128,6 +132,10 @@ _EVENT_PAGES = {
     "combatantInfo": {
         "params": "$code: String!, $start: Float!",
         "filter": "dataType: CombatantInfo, killType: Encounters",
+    },
+    "powerInfusion": {
+        "params": "$code: String!, $start: Float!",
+        "filter": "filterExpression: \"type = 'applybuff' and ability.name = 'Power Infusion'\", killType: Encounters",
     },
     "potionEvents": {
         "params": "$code: String!, $start: Float!",
@@ -237,7 +245,8 @@ class WCLClient:
         variables = {"code": ref.code, "deathsKillType": "All" if settings.deaths_include_trash else "Encounters"}
         report = await self.query(ref.host, query, variables)
         for field, key in (("deathEvents", "deaths"), ("resurrectEvents", "resurrects"),
-                           ("combatantInfo", "combatantInfo"), ("potionEvents", "potions")):
+                           ("combatantInfo", "combatantInfo"), ("potionEvents", "potions"),
+                           ("powerInfusion", "powerInfusion")):
             report[key] = await self._all_events(ref, report.pop(field, None), field, variables, potion_filter)
         return report
 

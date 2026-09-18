@@ -91,6 +91,21 @@ def test_pulls_bosses_and_progress():
     assert not boss_c.killed and boss_c.best_wipe.boss_pct == 30 and boss_c.best_wipe.phase == 2
 
 
+def test_time_spent_dead_stops_at_a_battle_rez_or_the_end_of_the_pull():
+    night = analyze(report(), SETTINGS)
+    dead = {c.name: round(s, 1) for c, s in night.dead_seconds.items()}
+    # Greyson: dead 40.2 s -> 100 s on Boss A's wipe, then 201 s -> 400 s on the kill.
+    assert dead["Greyson"] == round((100_000 - 40_200 + 400_000 - 201_000) / 1000, 1)
+    # Dyer died twice on the wipe without a rez in between: only the first death counts. Then a
+    # battle rez at 250 s cut the second pull short.
+    assert dead["Dyer"] == round((100_000 - 40_050 + 250_000 - 201_100) / 1000, 1)
+
+
+def test_power_infusion_ignores_priests_on_themselves():
+    night = analyze(report(), SETTINGS)
+    assert {(g.name, r.name): n for (g, r), n in night.power_infusion.items()} == {("Healz", "Pumper"): 4}
+
+
 def test_rates_are_per_second_of_the_pulls_each_player_was_in():
     night = analyze(report(), SETTINGS)
     rates = {r.char.name: r for r in night.rates}
@@ -199,6 +214,8 @@ def test_awards():
     assert "**🛡️ Outdamaged by a tank** - **Greyson** did less damage than **Tanky**" in text
     assert "**🎯 Nemesis** - **Dyer** died to Fire 3 times" in text
     assert "**🧲 Brez magnet** - **Dyer** · rezzed 3 times" in text
+    assert "**👻 Ghost** - **Greyson** · spent 4m dead" in text
+    assert "**💜 PI's favorite** - **Pumper** · got Power Infusion from **Healz** 4 times" in text
     assert "**💀 Floor inspector**\n-# Deaths before the wipe was called\n**Dyer** 3 · **Greyson** 2" in text
     # Nothing worth saying tonight: these stay silent rather than print a weak line.
     for quiet in ("Metronome", "Rollercoaster", "Battle healer", "Canary", "Couldn't wait for loot",

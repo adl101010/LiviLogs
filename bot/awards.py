@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from .config import RecapSettings
-from .recap import DPS, HEALER, TANK, Boss, Char, Night, ParseLine
+from .recap import DPS, HEALER, TANK, Boss, Char, Night, ParseLine, whole
 
 HEADLINE = "headline"
 NIGHT = "night"
@@ -188,7 +188,7 @@ class Builder:
                 if lines:
                     best = max(p.average for p in lines)
                     top = [p.char for p in lines if p.average == best]
-                    self.top_line(title, key, top, f"{best:.1f}")
+                    self.top_line(title, key, top, f"{best}")
         else:
             for role, title, key, unit in ((DPS, "Top DPS", "top_dps", ""), (HEALER, "Top healer", "top_healer", " HPS")):
                 rates = [r for r in night.rates if r.role == role]
@@ -224,7 +224,7 @@ class Builder:
             kind = "healing" if p.role == HEALER else "damage"
             streak = self.history.streak(key, p.char, self.night.start_ms)
             running = f", {streak + 1} raids running" if streak else ""
-            parts += [p.char, f" ({kind} {p.average:.1f}{running})"]
+            parts += [p.char, f" ({kind} {p.average}{running})"]
         return parts
 
     def last_raid(self, boss: Boss) -> str:
@@ -300,7 +300,7 @@ class Builder:
                         parts.append(" · ")
                     now = parse_colour(p.average)
                     parts.append(("👑 " if i == 0 else "") + (f"{now} " if now != colour else ""))
-                    parts += [p.char, f" {p.average:.1f}"]
+                    parts += [p.char, f" {p.average}"]
                     colour = now
             else:
                 entries = [r for r in night.rates if r.role == role]
@@ -316,7 +316,7 @@ class Builder:
 
     def highlights(self) -> None:
         night = self.night
-        pinks = [(p, [(pct, boss) for pct, boss in p.parses if pct >= 99]) for p in night.parses]
+        pinks = [(p, [(whole(pct), boss) for pct, boss in p.parses if whole(pct) >= 99]) for p in night.parses]
         pinks = [(p, hits) for p, hits in pinks if hits]
         if pinks:
             gold = any(pct >= 100 for _, hits in pinks for pct, _ in hits)
@@ -326,7 +326,7 @@ class Builder:
                     parts.append("; ")
                 by_value: dict[int, list[str]] = {}
                 for pct, boss in hits:
-                    by_value.setdefault(int(pct), []).append(boss)
+                    by_value.setdefault(pct, []).append(boss)
                 text = ", ".join(f"{v} on {' and '.join(dict.fromkeys(bosses))}" for v, bosses in sorted(by_value.items(), reverse=True))
                 parts += [p.char, f", {text}"]
             self.add(HIGHLIGHTS, parts, "pink", [p.char for p, _ in pinks])
@@ -336,8 +336,8 @@ class Builder:
         spreads = [(s, p) for s, p in spreads if s <= 15 and p.average >= 50]
         if spreads:
             s, p = min(spreads, key=lambda sp: (sp[0], -sp[1].average))
-            lo, hi = min(v for v, _ in p.parses), max(v for v, _ in p.parses)
-            self.add(HIGHLIGHTS, ["🎵 **Metronome:** ", p.char, f", {lo:.0f} to {hi:.0f} on every boss",
+            lo, hi = whole(min(v for v, _ in p.parses)), whole(max(v for v, _ in p.parses))
+            self.add(HIGHLIGHTS, ["🎵 **Metronome:** ", p.char, f", {lo} to {hi} on every boss",
                                   self.running("metronome", p.char)], "metronome", [p.char])
 
         self.counter_award(HIGHLIGHTS, "kick", "🦶 **Kick captain:** ", night.interrupts, 5, "interrupt", next_best=True)
@@ -379,7 +379,7 @@ class Builder:
         if worst:
             pct, boss, p = min(worst, key=lambda w: (w[0], w[2].char.name.casefold()))
             if pct <= 10:
-                self.add(LOWLIGHTS, ["🚽 **Parse of shame:** ", p.char, f", {pct:.0f} on {boss}",
+                self.add(LOWLIGHTS, ["🚽 **Parse of shame:** ", p.char, f", {whole(pct)} on {boss}",
                                      self.running("shame", p.char)], "shame", [p.char])
 
         swings = []
@@ -391,7 +391,8 @@ class Builder:
         swings = [s for s in swings if s[0] >= 50]
         if swings:
             _, p, lo, hi = max(swings, key=lambda s: s[0])
-            self.add(LOWLIGHTS, ["🎢 **Rollercoaster:** ", p.char, f", {lo[0]:.0f} on {lo[1]} but {hi[0]:.0f} on {hi[1]}"],
+            self.add(LOWLIGHTS, ["🎢 **Rollercoaster:** ", p.char,
+                                 f", {whole(lo[0])} on {lo[1]} but {whole(hi[0])} on {hi[1]}"],
                      "rollercoaster", [p.char])
 
         healers = sorted(((night.damage_done.get(c, 0), c) for c, r in night.roles.items() if r == HEALER),
@@ -401,7 +402,7 @@ class Builder:
             ratio = dmg / max(healers[1][0], 1)
             ratio_text = f"{ratio:.0f}×" if ratio >= 2.95 else f"{ratio:.1f}×"
             grey = next((p for p in night.grey if p.char == char), None)
-            grey_text = f" with a {grey.average:.1f} healing parse" if grey else ""
+            grey_text = f" with a {grey.average} healing parse" if grey else ""
             self.add(LOWLIGHTS, ["⚔️ **Battle healer:** ", char, f", {fmt_big(dmg)} damage ({ratio_text} the next healer)"
                                  f"{grey_text}", self.running("battle_healer", char)], "battle_healer", [char])
 

@@ -35,8 +35,8 @@ def test_guild_kill_night():
     # WCL lists 105 players (everyone seen in the log); only the 16 in boss pulls are the raid.
     assert len(data["masterData"]["actors"]) == 105 and len(night.roster) == 16
     assert (night.difficulty, night.kills, night.wipes) == (4, 7, 11)
-    assert [p.average for p in night.high] == [96.0]
-    assert [(p.average, p.role) for p in night.grey] == [(20.9, "healers")]
+    assert [p.average for p in night.high] == [96]
+    assert [(p.average, p.role) for p in night.grey] == [(20, "healers")]
     assert [(d.deaths, d.first_deaths) for d in night.floor] == [(11, 5), (9, 1), (7, 1), (7, 0)]
 
     r, text, _ = text_of(night)
@@ -45,7 +45,7 @@ def test_guild_kill_night():
     assert "wiped with the boss at **1.5%** in P3" in text  # The Coiled Altar
     assert "🦶 **Kick captain:**" in text and "17 interrupts (next best: 8)" in text
     assert "🧼 **Dispel machine:**" in text and "177 dispels" in text
-    assert "72M damage (3× the next healer) with a 20.9 healing parse" in text
+    assert "72M damage (3× the next healer) with a 20 healing parse" in text
     assert "🎁 **Couldn't wait for loot:**" in text and "3 deaths each on kills" in text
     assert "Nemesis" not in text  # a three-way tie at 3: nobody stands out
 
@@ -83,7 +83,7 @@ def test_classic_tbc():
     night = analyze(load("classic_tbc"), SETTINGS)
     assert (night.zone, night.difficulty, night.kills, night.wipes) == ("ZA / SWP", 3, 12, 0)
     assert len(night.roster) == 25
-    assert [p.average for p in night.grey] == [4.9, 12.8, 20.0, 23.2, 24.6]
+    assert [p.average for p in night.grey] == [4, 12, 20, 23, 24]
     r, text, _ = text_of(night)
     assert "12 bosses down" in r.headline
     assert "🧼 **Dispel machine:**" in text
@@ -92,7 +92,7 @@ def test_classic_tbc():
 def test_old_shape_without_new_fields_still_works():
     # An earlier fixture from before the report grew: no friendlyPlayers, tables or player details.
     night = analyze(load("retail_heroic"), SETTINGS)
-    assert [p.average for p in night.high] == [93.9, 93.7, 92.8]
+    assert [p.average for p in night.high] == [93, 93, 92]
     assert len(night.grey) == 16
     r, text, _ = text_of(night)
     assert "Top DPS" in r.headline and "Floor inspector" in text

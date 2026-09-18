@@ -7,9 +7,9 @@ full report in a thread under it.
 ```
 📜 Raid report · The Venomous Abyss · Heroic · Sep 15 · 7 bosses down · 18 pulls · 2h 27m
 📈 Ula'tek: 8 wipes, best P3 at 44%
-🏆 Top DPS: @Zugzug 89.4 · Top healer: @Bubbleheart 96.0 · Top tank: @Tankenstein 82.0
-🌟 90+: @Bubbleheart (healing 96.0)
-🗑️ Grey: @Totemtoss (healing 20.9)
+🏆 Top DPS: @Zugzug 88 · Top healer: @Bubbleheart 95 · Top tank: @Tankenstein 81
+🌟 90+: @Bubbleheart (healing 95)
+🗑️ Grey: @Totemtoss (healing 20)
 💀 Floor inspector: @Facepull (11 deaths)
 🧵 Full report in the thread ↓
 ```
@@ -26,8 +26,9 @@ The thread has five sections, each posted only if it has something to say:
 
 How the numbers work:
 
-- **Parses** are each player's average across the night's boss kills. DPS and tanks are ranked on
-  damage, healers on healing. Tanks are left out of the grey list (they nearly always parse grey on DPS).
+- **Parses** are each player's average across the night's boss kills, shown the way WCL shows it:
+  a whole number with the decimals dropped (95.9 is a 95, so 89.9 isn't in the 90+ club). DPS and
+  tanks are ranked on damage, healers on healing. Tanks are left out of the grey list (they nearly always parse grey on DPS).
   They're WCL's numbers at the moment the report is posted. WCL re-ranks every log against everyone
   else's as the tier goes on, so the site's parses drift down a point or two over the following days.
 - **Progression nights** (no kills) swap parses for raw DPS/HPS, divided by the time each person was

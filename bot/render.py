@@ -57,6 +57,8 @@ def render(
         for d in recap.deaths:
             first = f" (first to die ×{d.first_deaths})" if d.first_deaths else ""
             parts.append(f"{who(d.char)} {d.deaths}{first}")
+        if recap.deaths_tied_more:
+            parts.append(f"+{recap.deaths_tied_more} more tied at {recap.deaths[-1].deaths}")
         lines.append(f"💀 **Most deaths:** {' · '.join(parts)}")
     else:
         lines.append("💀 **Most deaths:** nobody died. Who are you people?")

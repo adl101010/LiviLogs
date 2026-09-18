@@ -1,7 +1,7 @@
 from dataclasses import replace
 
 from bot.config import RecapSettings
-from bot.recap import Char, build_recap, norm_name, norm_realm
+from bot.recap import Char, DeathLine, _top_with_ties, build_recap, norm_name, norm_realm
 from bot.render import render, split_message
 
 from .sample_report import report
@@ -19,6 +19,14 @@ def test_averages_are_per_night():
         ("Pumper", 94.5, 2),
         ("Middling", 90.0, 2),  # 89 and 91: average exactly on the line counts
     ]
+
+
+def test_healers_use_healing_parses_and_others_use_damage():
+    recap = build_recap(report(), replace(SETTINGS, parse_high=-1))
+    by_name = {p.char.name: p for p in recap.high}
+    assert by_name["Healz"].average == 65.0  # 60 and 70 healing, not 3 damage
+    assert by_name["Tanky"].average == 6.5  # damage, not the 99 in the healing table
+    assert by_name["Greyson"].average == 20.0  # "-" in the healing table is ignored
 
 
 def test_grey_excludes_tanks_by_default():
@@ -44,6 +52,25 @@ def test_deaths_respect_wipe_cutoff_and_count_first_deaths():
     ]
 
 
+def _deaths(*counts):
+    return [DeathLine(Char(f"P{i}", "R"), n, 0) for i, n in enumerate(counts)]
+
+
+def test_big_tie_at_the_bottom_is_dropped():
+    shown, more = _top_with_ties(_deaths(2, 1, 1, 1, 1, 1), 3)
+    assert [d.deaths for d in shown] == [2] and more == 0
+
+
+def test_small_tie_is_included():
+    shown, more = _top_with_ties(_deaths(6, 6, 4, 4, 1), 3)
+    assert [d.deaths for d in shown] == [6, 6, 4, 4] and more == 0
+
+
+def test_everyone_tied_shows_some_and_counts_the_rest():
+    shown, more = _top_with_ties(_deaths(1, 1, 1, 1, 1, 1, 1), 3)
+    assert len(shown) == 3 and more == 4
+
+
 def test_deaths_can_include_trash():
     recap = build_recap(report(), replace(SETTINGS, deaths_include_trash=True, deaths_top_n=10))
     assert "Tanky" in names(recap.deaths)
@@ -63,7 +90,7 @@ def test_processing_flag():
 
 def test_no_kills_means_no_parses():
     data = report()
-    data["rankings"] = {"data": []}
+    data["dpsRankings"] = data["hpsRankings"] = {"data": []}
     recap = build_recap(data, SETTINGS)
     assert not recap.has_parses
     assert recap.deaths  # deaths still reported
@@ -76,10 +103,10 @@ def test_missing_fields_do_not_crash():
 
 def test_realm_filled_from_master_data_when_rankings_lack_it():
     data = report()
-    for fight in data["rankings"]["data"]:
+    for fight in data["dpsRankings"]["data"] + data["hpsRankings"]["data"]:
         for role in fight["roles"].values():
             for c in role["characters"]:
-                del c["server"]
+                c.pop("server", None)
     recap = build_recap(data, SETTINGS)
     assert recap.high[0].char == Char("Pumper", "Area 52")
 
@@ -106,7 +133,7 @@ def test_render_mentions_linked_and_bolds_unlinked():
 
 def test_render_empty_sections():
     data = report()
-    data["deaths"] = {"data": {"entries": []}}
+    data["deaths"] = []
     recap = build_recap(data, replace(SETTINGS, parse_high=100, parse_grey=0))
     text, _ = render(recap, "u", replace(SETTINGS, parse_high=100, parse_grey=0), lambda c: None)
     assert "100+ club:** nobody tonight" in text

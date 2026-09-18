@@ -1,7 +1,8 @@
 """Turns raw WCL report JSON into the recap numbers. No network, no Discord: easy to test.
 
-WCL marks the rankings and table JSON as "not frozen", so every read of that JSON lives here and
-tolerates missing fields rather than crashing a raid-night post.
+WCL marks the rankings and events JSON as "not frozen", so every read of that JSON lives here and
+tolerates missing fields rather than crashing a raid-night post. Shape checked against real retail
+and Classic logs on 2026-09-18.
 """
 
 import unicodedata
@@ -11,6 +12,7 @@ from dataclasses import dataclass, field
 from .config import RecapSettings
 
 TANK = "tanks"
+HEALER = "healers"
 
 # Letters that don't decompose into base letter + accent.
 _FOLD = str.maketrans({"ø": "o", "æ": "ae", "œ": "oe", "ð": "d", "þ": "th", "ł": "l", "đ": "d"})
@@ -72,6 +74,7 @@ class Recap:
     high: list[ParseLine] = field(default_factory=list)
     grey: list[ParseLine] = field(default_factory=list)
     deaths: list[DeathLine] = field(default_factory=list)
+    deaths_tied_more: int = 0  # tied with the last shown line but left out
     players: list[Char] = field(default_factory=list)
 
 
@@ -101,23 +104,30 @@ def _parses(report: dict, players: dict[int, Char]) -> dict[Char, list[tuple[flo
     for char in players.values():
         realm_by_name[norm_name(char.name)].add(char.realm)
 
+    # Healers' parses come from the healing rankings, everyone else's from the damage rankings.
+    sources = [
+        (report.get("dpsRankings"), lambda role: role != HEALER),
+        (report.get("hpsRankings"), lambda role: role == HEALER),
+    ]
     parses: dict[Char, list[tuple[float, str]]] = defaultdict(list)
-    for fight in _ranking_fights(report.get("rankings")):
-        if fight.get("kill") in (0, False):
-            continue
-        roles = fight.get("roles") or {}
-        for role_key, role in roles.items():
-            characters = role.get("characters") if isinstance(role, dict) else None
-            for c in characters or []:
-                pct = c.get("rankPercent")
-                name = c.get("name")
-                if pct is None or not name:
+    for rankings, wanted in sources:
+        for fight in _ranking_fights(rankings):
+            if fight.get("kill") in (0, False):
+                continue
+            for role_key, role in (fight.get("roles") or {}).items():
+                role_key = role_key.lower()
+                if not wanted(role_key) or not isinstance(role, dict):
                     continue
-                realm = _server_name(c.get("server"))
-                if not realm:
-                    known = realm_by_name.get(norm_name(name), set())
-                    realm = next(iter(known)) if len(known) == 1 else ""
-                parses[Char(name, realm)].append((float(pct), role_key.lower()))
+                for c in role.get("characters") or []:
+                    pct = c.get("rankPercent")
+                    name = c.get("name")
+                    if not isinstance(pct, (int, float)) or not name:
+                        continue  # "-" when WCL has nothing to rank against
+                    realm = _server_name(c.get("server"))
+                    if not realm:
+                        known = realm_by_name.get(norm_name(name), set())
+                        realm = next(iter(known)) if len(known) == 1 else ""
+                    parses[Char(name, realm)].append((float(pct), role_key))
     return parses
 
 
@@ -133,18 +143,16 @@ def _parse_lines(parses: dict[Char, list[tuple[float, str]]]) -> list[ParseLine]
     return lines
 
 
-def _death_lines(report: dict, players: dict[int, Char], fight_ids: set[int], settings: RecapSettings) -> list[DeathLine]:
-    table = report.get("deaths") or {}
-    table = table.get("data", table) if isinstance(table, dict) else {}
-    entries = table.get("entries") or []
-    by_name = {norm_name(c.name): c for c in players.values()}
-
+def _death_lines(
+    report: dict, players: dict[int, Char], fight_ids: set[int], settings: RecapSettings
+) -> tuple[list[DeathLine], int]:
+    events = report.get("deaths")
     per_fight: dict[int, list[tuple[float, Char]]] = defaultdict(list)
-    for e in entries:
+    for e in events if isinstance(events, list) else []:
         fight = e.get("fight")
         if fight_ids and fight not in fight_ids and not settings.deaths_include_trash:
             continue
-        char = players.get(e.get("id")) or by_name.get(norm_name(e.get("name") or ""))
+        char = players.get(e.get("targetID"))
         if char is None:
             continue  # pets, NPCs
         per_fight[fight].append((e.get("timestamp") or 0, char))
@@ -160,13 +168,27 @@ def _death_lines(report: dict, players: dict[int, Char], fight_ids: set[int], se
         if counted:
             firsts[counted[0][1]] += 1
 
-    ranked = sorted(deaths, key=lambda c: (-deaths[c], -firsts[c], c.name.casefold()))
-    top: list[DeathLine] = []
-    for char in ranked:
-        if len(top) >= settings.deaths_top_n and deaths[char] < top[-1].deaths:
-            break  # ties with the last place still get called out
-        top.append(DeathLine(char, deaths[char], firsts[char]))
-    return top
+    ranked = [
+        DeathLine(c, deaths[c], firsts[c])
+        for c in sorted(deaths, key=lambda c: (-deaths[c], -firsts[c], c.name.casefold()))
+    ]
+    return _top_with_ties(ranked, settings.deaths_top_n)
+
+
+def _top_with_ties(ranked: list[DeathLine], n: int) -> tuple[list[DeathLine], int]:
+    """Top n, plus anyone tied with last place, unless the tie is big (a clean night where five
+    people died once). Returns the lines to show and how many tied players were left out."""
+    shown: list[DeathLine] = []
+    i = 0
+    while i < len(ranked) and len(shown) < n:
+        group = [d for d in ranked[i:] if d.deaths == ranked[i].deaths]
+        if shown and len(shown) + len(group) > n + 2:
+            break  # the tie would crowd the list; the players above it are the story
+        if not shown and len(group) > n + 2:
+            return group[: n], len(group) - n  # everyone tied at the top: show some, count the rest
+        shown += group
+        i += len(group)
+    return shown, 0
 
 
 def build_recap(report: dict, settings: RecapSettings) -> Recap:
@@ -176,6 +198,7 @@ def build_recap(report: dict, settings: RecapSettings) -> Recap:
     difficulties = Counter(f.get("difficulty") for f in kills or fights if f.get("difficulty"))
 
     lines = _parse_lines(_parses(report, players))
+    deaths, tied_more = _death_lines(report, players, {f["id"] for f in fights if "id" in f}, settings)
     high = sorted(
         (p for p in lines if p.average >= settings.parse_high),
         key=lambda p: (-p.average, p.char.name.casefold()),
@@ -207,6 +230,7 @@ def build_recap(report: dict, settings: RecapSettings) -> Recap:
         has_parses=bool(lines),
         high=high,
         grey=grey,
-        deaths=_death_lines(report, players, {f["id"] for f in fights if "id" in f}, settings),
+        deaths=deaths,
+        deaths_tied_more=tied_more,
         players=sorted(seen.values(), key=lambda c: c.name.casefold()),
     )

@@ -36,7 +36,7 @@ def test_parse_character():
 
 def test_rankings_args():
     assert _rankings_args(RecapSettings()) == ""
-    assert _rankings_args(RecapSettings(compare="Parses", timeframe="Today")) == "(compare: Parses, timeframe: Today)"
+    assert _rankings_args(RecapSettings(compare="Parses", timeframe="Today")) == ", compare: Parses, timeframe: Today"
 
 
 def test_site_specific_credentials(monkeypatch):

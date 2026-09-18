@@ -32,10 +32,6 @@ class ReportRef:
     def url(self) -> str:
         return f"https://{self.host}/reports/{self.code}"
 
-    @property
-    def is_retail(self) -> bool:
-        return self.host.startswith("www.")
-
 
 def find_report_links(text: str) -> list[ReportRef]:
     refs: list[ReportRef] = []
@@ -64,6 +60,9 @@ query Status($code: String!) {
 }
 """
 
+# DPS and tanks are ranked on damage, healers on healing. WCL's default ranks everyone on damage,
+# which would put nearly every healer in the grey list, so both are fetched explicitly.
+# Deaths come from the events feed, not the deaths table: the table silently stops at 200 deaths.
 _FULL_QUERY = """
 query Recap($code: String!, $deathsKillType: KillType) {
   reportData {
@@ -72,22 +71,40 @@ query Recap($code: String!, $deathsKillType: KillType) {
       zone { id name }
       fights(killType: Encounters) { id encounterID name kill difficulty size startTime endTime }
       masterData { actors(type: "Player") { id name server subType } }
-      rankings%(rankings_args)s
-      deaths: table(dataType: Deaths, killType: $deathsKillType)
+      dpsRankings: rankings(playerMetric: dps%(rankings_args)s)
+      hpsRankings: rankings(playerMetric: hps%(rankings_args)s)
+      deathEvents: events(dataType: Deaths, killType: $deathsKillType, startTime: 0, endTime: %(end)s, limit: 10000) {
+        data nextPageTimestamp
+      }
     }
   }
 }
 """
 
+_MORE_DEATHS_QUERY = """
+query MoreDeaths($code: String!, $deathsKillType: KillType, $start: Float!) {
+  reportData {
+    report(code: $code) {
+      deathEvents: events(dataType: Deaths, killType: $deathsKillType, startTime: $start, endTime: %(end)s, limit: 10000) {
+        data nextPageTimestamp
+      }
+    }
+  }
+}
+"""
+
+# Event times are milliseconds from the start of the report; this is "until the end".
+_END = "1000000000000"
+
 
 def _rankings_args(settings: RecapSettings) -> str:
     # Enum values go in as literals; leaving an argument out means "same as the report page".
-    args = []
+    args = ""
     if settings.compare:
-        args.append(f"compare: {settings.compare}")
+        args += f", compare: {settings.compare}"
     if settings.timeframe:
-        args.append(f"timeframe: {settings.timeframe}")
-    return f"({', '.join(args)})" if args else ""
+        args += f", timeframe: {settings.timeframe}"
+    return args
 
 
 class WCLClient:
@@ -149,13 +166,25 @@ class WCLClient:
                 raise ReportUnavailable(message)
             raise WCLError(message)
         if errors:
-            log.warning("WCL returned partial data: %s", errors)
+            # Partial data would mean a recap with a section quietly missing. Fail and retry instead.
+            raise WCLError("; ".join(e.get("message", "") for e in errors))
         return report
 
     async def report_status(self, ref: ReportRef) -> dict:
         return await self.query(ref.host, _STATUS_QUERY, {"code": ref.code})
 
     async def report_full(self, ref: ReportRef, settings: RecapSettings) -> dict:
-        query = _FULL_QUERY % {"rankings_args": _rankings_args(settings)}
-        kill_type = "All" if settings.deaths_include_trash else "Encounters"
-        return await self.query(ref.host, query, {"code": ref.code, "deathsKillType": kill_type})
+        query = _FULL_QUERY % {"rankings_args": _rankings_args(settings), "end": _END}
+        variables = {"code": ref.code, "deathsKillType": "All" if settings.deaths_include_trash else "Encounters"}
+        report = await self.query(ref.host, query, variables)
+
+        page = report.pop("deathEvents", None) or {}
+        deaths = list(page.get("data") or [])
+        while page.get("nextPageTimestamp") is not None:
+            more = await self.query(
+                ref.host, _MORE_DEATHS_QUERY % {"end": _END}, {**variables, "start": page["nextPageTimestamp"]}
+            )
+            page = more.get("deathEvents") or {}
+            deaths += page.get("data") or []
+        report["deaths"] = deaths
+        return report

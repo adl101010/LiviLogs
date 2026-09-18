@@ -13,7 +13,8 @@ night and posts a recap that tags the actual people:
 - **Parses** are each player's average across the night's boss kills. DPS are ranked on DPS, healers on
   healing. Tanks are left out of the grey list (they nearly always parse grey on DPS).
 - **Deaths** count every boss pull, kills and wipes. Deaths after the 5th in a pull are ignored, so
-  people who die after the wipe is called don't get blamed. Ties for last place are all included.
+  people who die after the wipe is called don't get blamed. Ties for last place are included, unless
+  it's a pile-up (five people who each died once) that would bury the actual worst offender.
 - **Retail and Classic.** The bot reads the WCL site from the link (`www.`, `classic.`, `fresh.`,
   `vanilla.`).
 - Logs must be uploaded as **Public or Unlisted**. Private logs can't be read by bots.
@@ -66,10 +67,10 @@ and Warcraft Logs. Data (links, which logs were posted) lives in the `wcl-bot-da
 
 ## Checking the numbers against the site
 
-`tools/probe.py` pulls a real log through the API and prints each player's night average under every
-parse option WCL offers, side by side, plus the exact recap the bot would post. Use it to confirm
-the numbers match what the report page shows, and set `WCL_COMPARE` / `WCL_TIMEFRAME` if the default
-doesn't match.
+`tools/probe.py` pulls a real log through the API and prints each player's night average under both
+comparisons WCL offers (Rankings: against the best of the tier; Parses: against the last two weeks,
+usually higher), plus the exact recap the bot would post. The default is Rankings. If the report page
+shows the other one, set `WCL_COMPARE=Parses`.
 
 ```
 python -m venv .venv
@@ -79,6 +80,8 @@ cp .env.example .env                                  # fill in WCL_CLIENT_ID / 
 ```
 
 Raw JSON lands in `tools/probe-out/` (git-ignored, since it contains character names).
+`python -m tools.make_fixture <probe json> tests/fixtures/<name>.json` turns one into a test fixture
+with the names replaced.
 
 ## Development
 

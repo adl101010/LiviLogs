@@ -24,12 +24,11 @@ from bot.wcl import WCLClient, find_report_links
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "tools" / "probe-out"
 
+# timeframe=Historical is left out: on current-tier logs WCL returns "-" for everyone.
 VARIANTS = {
     "API default": RecapSettings(),
-    "Parses/Today": RecapSettings(compare="Parses", timeframe="Today"),
-    "Parses/Hist": RecapSettings(compare="Parses", timeframe="Historical"),
-    "Rankings/Today": RecapSettings(compare="Rankings", timeframe="Today"),
-    "Rankings/Hist": RecapSettings(compare="Rankings", timeframe="Historical"),
+    "Parses": RecapSettings(compare="Parses"),
+    "Rankings": RecapSettings(compare="Rankings"),
 }
 
 

@@ -1,9 +1,9 @@
 # Dockge stack. Put the values in the stack's .env (see .env.example).
 # No ports: the bot only makes outbound connections to Discord and Warcraft Logs.
 services:
-  wcl-bot:
-    image: ghcr.io/adl101010/wcl-bot:stable
-    container_name: wcl-bot
+  livilogs:
+    image: ghcr.io/adl101010/livilogs:stable
+    container_name: livilogs
     restart: unless-stopped
     environment:
       DISCORD_TOKEN: ${DISCORD_TOKEN}
@@ -24,7 +24,7 @@ services:
       WCL_COMPARE: ${WCL_COMPARE:-}
       WCL_TIMEFRAME: ${WCL_TIMEFRAME:-}
     volumes:
-      - wcl-bot-data:/data
+      - livilogs-data:/data
 
 volumes:
-  wcl-bot-data:
+  livilogs-data:

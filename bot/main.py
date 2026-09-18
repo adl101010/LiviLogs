@@ -17,7 +17,7 @@ from .store import PendingReport, Store
 from .watch import check_ready
 from .wcl import ReportRef, ReportUnavailable, WCLClient, WCLError, find_report_links
 
-log = logging.getLogger("wcl-bot")
+log = logging.getLogger("livilogs")
 
 NO_PINGS = discord.AllowedMentions.none()
 

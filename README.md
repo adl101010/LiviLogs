@@ -1,4 +1,4 @@
-# wcl-bot
+# LiviLogs
 
 A Discord bot for WoW guilds. When a Warcraft Logs link is posted after raid, it reads the whole
 night and posts a report that tags the actual people: a short headline in the logs channel, and the
@@ -28,6 +28,8 @@ How the numbers work:
 
 - **Parses** are each player's average across the night's boss kills. DPS and tanks are ranked on
   damage, healers on healing. Tanks are left out of the grey list (they nearly always parse grey on DPS).
+  They're WCL's numbers at the moment the report is posted. WCL re-ranks every log against everyone
+  else's as the tier goes on, so the site's parses drift down a point or two over the following days.
 - **Progression nights** (no kills) swap parses for raw DPS/HPS, divided by the time each person was
   actually in pulls; anyone who sat some out gets a "(6 pulls)" note instead of a bad number. The
   headline shows the best pull and how it compares with last raid's.
@@ -97,7 +99,7 @@ In Dockge, create a stack from [`docker-compose.yml`](docker-compose.yml) and fi
 from [`.env.example`](.env.example). Set `TIMEZONE` to the guild's timezone: it's only used for the
 date in thread titles, but a US raid that crosses midnight UTC would otherwise get tomorrow's date.
 It needs no ports: it only makes outbound connections to Discord and Warcraft Logs. Data (links,
-history, which logs were posted) lives in the `wcl-bot-data` volume.
+history, which logs were posted) lives in the `livilogs-data` volume.
 
 ## Trying it without Discord
 
@@ -114,7 +116,7 @@ cp .env.example .env                                  # fill in WCL_CLIENT_ID / 
 
 Add `--compare` to also print each player's average under both WCL parse comparisons (Rankings:
 against the best of the tier; Parses: against the last two weeks, usually higher). The bot uses
-Rankings by default; if the report page shows the other one, set `WCL_COMPARE=Parses`.
+Rankings, which is what WCL's report pages show (checked against the site on 2026-09-18).
 
 Raw JSON lands in `tools/probe-out/` (git-ignored, since it contains character names).
 `python -m tools.make_fixture <probe json> tests/fixtures/<name>.json` turns one into a test fixture
@@ -136,4 +138,4 @@ with the names replaced.
 | `bot/store.py` | SQLite: links, seen characters, report status, history |
 | `bot/main.py` | Discord: channel watcher, slash commands, posting, threads, pings |
 
-Pushing `dev` builds `ghcr.io/adl101010/wcl-bot:dev`; pushing `master` builds `:stable` and `:latest`.
+Pushing `dev` builds `ghcr.io/adl101010/livilogs:dev`; pushing `master` builds `:stable` and `:latest`.

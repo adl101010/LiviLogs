@@ -110,7 +110,7 @@ class Config:
             guild_id=_int("DISCORD_GUILD_ID"),
             officer_role_id=_int("OFFICER_ROLE_ID"),
             default_realm=_str("DEFAULT_REALM"),
-            db_path=_str("DB_PATH", "/data/wcl-bot.sqlite3"),
+            db_path=_str("DB_PATH", "/data/livilogs.sqlite3"),
             poll_minutes=_int("POLL_MINUTES", 5),
             quiet_minutes=_int("QUIET_MINUTES", 20),
             max_wait_hours=_int("MAX_WAIT_HOURS", 8),

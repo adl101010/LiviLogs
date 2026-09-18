@@ -43,22 +43,24 @@ jobs:
 
     # dev branch -> :dev (+ :dev-<sha> for traceability)
     # master branch -> :stable, :latest (+ :<sha>)
+    # Image names must be lowercase: adl101010/LiviLogs -> ghcr.io/adl101010/livilogs
     - name: Compute image tags
       id: tags
       run: |
+        image="ghcr.io/${GITHUB_REPOSITORY,,}"
         if [ "${{ github.ref_name }}" = "master" ]; then
           {
             echo "tags<<EOF"
-            echo "ghcr.io/${{ github.repository }}:stable"
-            echo "ghcr.io/${{ github.repository }}:latest"
-            echo "ghcr.io/${{ github.repository }}:${{ github.sha }}"
+            echo "$image:stable"
+            echo "$image:latest"
+            echo "$image:${{ github.sha }}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
         else
           {
             echo "tags<<EOF"
-            echo "ghcr.io/${{ github.repository }}:dev"
-            echo "ghcr.io/${{ github.repository }}:dev-${{ github.sha }}"
+            echo "$image:dev"
+            echo "$image:dev-${{ github.sha }}"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
         fi

@@ -12,14 +12,14 @@ button:
 ┃ Raid report · The Venomous Abyss                                    [boss]
 ┃ Heroic · Sep 15, 2026 · 7 bosses down · 18 pulls · 2h 27m
 ┃ ─────────────────────────────────────────
-┃ 🏆 Top DPS @Zugzug 88.6
-┃ 💚 Top healer @Bubbleheart 95.9
-┃ 🛡️ Top tank @Tankenstein 81.1
-┃ 📈 Ula'tek 8 wipes · best P3 at 44%
+┃ 🏆 Top DPS - @Zugzug 88.6
+┃ 💚 Top healer - @Bubbleheart 95.9
+┃ 🛡️ Top tank - @Tankenstein 81.1
+┃ 📈 Ula'tek - 8 wipes · best P3 at 44%
 ┃ ─────────────────────────────────────────
-┃ 🌟 90+ @Bubbleheart healing 95.9
-┃ 🗑️ Grey @Totemtoss healing 20.3
-┃ 💀 Floor inspector @Facepull 11 deaths
+┃ 🌟 90+ - @Bubbleheart healing 95.9
+┃ 🗑️ Grey - @Totemtoss healing 20.3
+┃ 💀 Floor inspector - @Facepull 11 deaths
 ┃ 🧵 Full report in the thread
 ┃ [ View log on Warcraft Logs ↗ ]
 ```

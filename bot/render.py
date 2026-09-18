@@ -88,7 +88,7 @@ def line_text(line: Line, who: _Names) -> str:
     if line.is_stacked:
         note = f"\n-# {line.note}" if line.note else ""
         return f"**{line.title}**{note}\n{body}"
-    return f"**{line.title}** {body}"
+    return f"**{line.title}** - {body}"
 
 
 def _blocks(lines: list[Line], who: _Names) -> list[str]:

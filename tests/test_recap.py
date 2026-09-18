@@ -150,13 +150,13 @@ def test_headline_card():
     assert card.accent == 0xF0B232  # gold for a kill night
     assert card.button == ("View log on Warcraft Logs", URL)
     assert card.blocks == [
-        "**🏆 Top DPS** <@111> 94.5\n"
-        "**💚 Top healer** **Healz** 65.0\n"
-        "**🛡️ Top tank** **Tanky** 6.5\n"
-        "**📈 Boss C** 2 wipes · best P2 at 30%",
-        "**🌟 90+** <@111> damage 94.5 · **Middling** damage 90.0\n"
-        "**🗑️ Grey** <@222> damage 20.0\n"
-        "**💀 Floor inspector** **Dyer** 3 deaths",
+        "**🏆 Top DPS** - <@111> 94.5\n"
+        "**💚 Top healer** - **Healz** 65.0\n"
+        "**🛡️ Top tank** - **Tanky** 6.5\n"
+        "**📈 Boss C** - 2 wipes · best P2 at 30%",
+        "**🌟 90+** - <@111> damage 94.5 · **Middling** damage 90.0\n"
+        "**🗑️ Grey** - <@222> damage 20.0\n"
+        "**💀 Floor inspector** - **Dyer** 3 deaths",
     ]
     assert card.footer == "🧵 Full report in the thread"
 
@@ -190,15 +190,15 @@ def test_leaderboard_one_block_per_role():
 
 def test_awards():
     text = all_text(full_text())
-    assert "**🩷 Pink parse** **Pumper** · 99 on Boss A" in text
-    assert "**🦶 Kick captain** **Pumper** · 6 interrupts (next best: 2)" in text
-    assert "**🧼 Dispel machine** **Healz** · 12 dispels" in text
-    assert "**🪄 Necromancer** **Healz** · 3 battle rezzes" in text
-    assert "**🚽 Parse of shame** **Greyson** · 10 on Boss A" in text
-    assert "**🧽 Damage sponge** **Dyer** · 100M damage taken" in text
-    assert "**🛡️ Outdamaged by a tank** **Greyson** did less damage than **Tanky**" in text
-    assert "**🎯 Nemesis** **Dyer** died to Fire 3 times" in text
-    assert "**🧲 Brez magnet** **Dyer** · rezzed 3 times" in text
+    assert "**🩷 Pink parse** - **Pumper** · 99 on Boss A" in text
+    assert "**🦶 Kick captain** - **Pumper** · 6 interrupts (next best: 2)" in text
+    assert "**🧼 Dispel machine** - **Healz** · 12 dispels" in text
+    assert "**🪄 Necromancer** - **Healz** · 3 battle rezzes" in text
+    assert "**🚽 Parse of shame** - **Greyson** · 10 on Boss A" in text
+    assert "**🧽 Damage sponge** - **Dyer** · 100M damage taken" in text
+    assert "**🛡️ Outdamaged by a tank** - **Greyson** did less damage than **Tanky**" in text
+    assert "**🎯 Nemesis** - **Dyer** died to Fire 3 times" in text
+    assert "**🧲 Brez magnet** - **Dyer** · rezzed 3 times" in text
     assert "**💀 Floor inspector**\n-# Deaths before the wipe was called\n**Dyer** 3 · **Greyson** 2" in text
     # Nothing worth saying tonight: these stay silent rather than print a weak line.
     for quiet in ("Metronome", "Rollercoaster", "Battle healer", "Canary", "Couldn't wait for loot",
@@ -210,9 +210,9 @@ def test_consumables_card():
     card = full_text().thread[-1]
     assert card.blocks == [
         "**🔮 Tryhards**\n-# Void-Touched rune\n**Pumper** every pull · **Middling** 3 of 5\n\n"
-        "**🍺 Potion seller** **Pumper** · 6 combat potions in 5 pulls\n"
-        "**🫗 Mana chugger** **Healz** · 4 mana potions\n"
-        "**🍪 Cookie monster** **Middling** · 10 healthstones and health potions",
+        "**🍺 Potion seller** - **Pumper** · 6 combat potions in 5 pulls\n"
+        "**🫗 Mana chugger** - **Healz** · 4 mana potions\n"
+        "**🍪 Cookie monster** - **Middling** · 10 healthstones and health potions",
         # Tanky drank none; Greyson one in 5. Healz drank mana potions, so isn't a hoarder. Dyer
         # died 3 times but used healthstones; Greyson died twice and used nothing (Fortifying
         # Brew is a class ability, not a consumable).
@@ -221,7 +221,7 @@ def test_consumables_card():
         "**🪦 Died with a healthstone in the bag**\n-# Not one healthstone or health potion all night\n"
         "**Greyson** died twice",
         # Only Boss C's pulls count for vantus: nobody used one on A or B.
-        "**⚗️ No flask** **Greyson** 2 of 5 pulls\n**🍗 Forgot to eat** **Dyer** 2 of 5 pulls\n\n"
+        "**⚗️ No flask** - **Greyson** 2 of 5 pulls\n**🍗 Forgot to eat** - **Dyer** 2 of 5 pulls\n\n"
         "**📜 No vantus**\n-# On pulls where most of the raid had one\n**Greyson** all 2 pulls",
     ]
 
@@ -264,7 +264,7 @@ def test_prog_night_swaps_parses_for_throughput():
     assert r.headline.title == "Prog report · Liberation of Undermine"
     assert r.headline.accent == 0xE67E22  # orange for a prog night
     assert "no kill yet" in r.headline.subtitle
-    assert "**🏆 Top DPS** **Pumper** 112k\n**💚 Top healer** **Healz** 62k HPS" in r.headline.blocks[0]
+    assert "**🏆 Top DPS** - **Pumper** 112k\n**💚 Top healer** - **Healz** 62k HPS" in r.headline.blocks[0]
     assert "90+" not in card_text(r.headline) and "Grey" not in card_text(r.headline)
     board = r.thread[1]
     assert (board.title, board.subtitle) == ("📊 Throughput", "Raw numbers: wipes don't get parses")
@@ -278,7 +278,7 @@ def test_single_boss_prog_night_headline():
     r = full_text(data)
     assert r.headline.title == "Prog report · Boss C"
     # On a prog night the best pull leads the headline.
-    assert r.headline.blocks[0].startswith("**📈 Best pull** P2 at 30% · the last pull of the night")
+    assert r.headline.blocks[0].startswith("**📈 Best pull** - P2 at 30% · the last pull of the night")
     assert r.thread_title == "Prog report · Sep 17 · Boss C"
 
 
@@ -308,10 +308,10 @@ def test_history_adds_progress_and_streaks():
         streaks={("floor", "Dyer"): 2, ("grey", "Greyson"): 1, ("sponge", "Dyer"): 1},
     )
     text = all_text(full_text(history=history))
-    assert "**📈 Boss C** 2 wipes · best P2 at 30% · last raid's best: P3 at 44%" in text
-    assert "**💀 Floor inspector** **Dyer** 3 deaths (3 raids running)" in text
-    assert "**🗑️ Grey** **Greyson** damage 20.0 (2 raids running)" in text
-    assert "**🧽 Damage sponge** **Dyer** · 100M damage taken (2 raids running)" in text
+    assert "**📈 Boss C** - 2 wipes · best P2 at 30% · last raid's best: P3 at 44%" in text
+    assert "**💀 Floor inspector** - **Dyer** 3 deaths (3 raids running)" in text
+    assert "**🗑️ Grey** - **Greyson** damage 20.0 (2 raids running)" in text
+    assert "**🧽 Damage sponge** - **Dyer** · 100M damage taken (2 raids running)" in text
 
 
 def test_thread_title_uses_the_guilds_timezone():

@@ -41,7 +41,7 @@ def test_guild_kill_night():
 
     r, text, _ = text_of(night)
     assert r.headline.subtitle.endswith("7 bosses down · 18 pulls · 2h 27m")
-    assert "**📈 Ula'tek** 8 wipes · best P3 at 44%" in card_text(r.headline)
+    assert "**📈 Ula'tek** - 8 wipes · best P3 at 44%" in card_text(r.headline)
     assert "wiped with the boss at **1.5%** in P3" in text  # The Coiled Altar
     assert "**🦶 Kick captain**" in text and "17 interrupts (next best: 8)" in text
     assert "**🧼 Dispel machine**" in text and "177 dispels" in text
@@ -66,8 +66,8 @@ def test_guild_prog_night():
     assert not night.has_parses
     r, text, _ = text_of(night)
     assert r.headline.title == "Prog report · Ula'tek" and r.headline.subtitle.startswith("Heroic")
-    assert r.headline.blocks[0].startswith("**📈 Best pull** P3 at 5.1% · the last pull of the night")
-    assert "**🏆 Top DPS** **P-" in r.headline.blocks[0] and "268k HPS" in r.headline.blocks[0]
+    assert r.headline.blocks[0].startswith("**📈 Best pull** - P3 at 5.1% · the last pull of the night")
+    assert "**🏆 Top DPS** - **P-" in r.headline.blocks[0] and "268k HPS" in r.headline.blocks[0]
     assert "`▇▅▅▄▅▅▃▄▃▃▇▂▂▂▂▇▅▁`" in text
     assert "reached P3 on 10 of 18 pulls" in text
     assert "(6 pulls)" in text and "(12 pulls)" in text  # people who sat out, not made to look bad

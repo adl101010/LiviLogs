@@ -69,7 +69,7 @@ query Recap($code: String!, $deathsKillType: KillType) {
     report(code: $code) {
       code title startTime endTime segments exportedSegments visibility
       zone { id name }
-      fights(killType: Encounters) { id encounterID name kill difficulty size startTime endTime }
+      fights(killType: Encounters) { id encounterID name kill difficulty size startTime endTime friendlyPlayers }
       masterData { actors(type: "Player") { id name server subType } }
       dpsRankings: rankings(playerMetric: dps%(rankings_args)s)
       hpsRankings: rankings(playerMetric: hps%(rankings_args)s)
@@ -160,9 +160,10 @@ class WCLClient:
         errors = body.get("errors") or []
         if report is None:
             message = "; ".join(e.get("message", "") for e in errors) or "report not found"
-            if not errors or any(
-                word in message.lower() for word in ("permission", "not exist", "not found", "private")
-            ):
+            # Only WCL's own "no such report" / "not allowed" answers. A query mistake also says
+            # things like "does not exist in enum" and must not be reported as a private log.
+            lowered = message.lower()
+            if not errors or "this report does not exist" in lowered or "permission" in lowered:
                 raise ReportUnavailable(message)
             raise WCLError(message)
         if errors:

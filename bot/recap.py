@@ -85,11 +85,22 @@ def _server_name(server) -> str:
 
 
 def _players(report: dict) -> dict[int, Char]:
+    """Players who were in at least one boss pull.
+
+    WCL's actor list also has everyone who merely walked past in the log (105 "players" for a
+    16-person raid), so it's narrowed to each pull's friendlyPlayers when WCL provides them.
+    """
     actors = ((report.get("masterData") or {}).get("actors")) or []
+    raiders: set[int] = set()
+    for fight in report.get("fights") or []:
+        if (fight.get("encounterID") or 0) > 0:
+            raiders.update(fight.get("friendlyPlayers") or [])
     return {
         a["id"]: Char(a.get("name") or "?", _server_name(a.get("server")))
         for a in actors
-        if a.get("id") is not None and (a.get("type") in (None, "Player"))
+        if a.get("id") is not None
+        and a.get("type") in (None, "Player")
+        and (not raiders or a["id"] in raiders)
     }
 
 

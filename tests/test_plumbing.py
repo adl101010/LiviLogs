@@ -54,8 +54,15 @@ def test_unwrap_errors():
             {"message": "You do not have permission to view this report."}]})
     with pytest.raises(ReportUnavailable):
         WCLClient._unwrap({"data": {"reportData": {"report": None}}})
+    with pytest.raises(ReportUnavailable):
+        WCLClient._unwrap({"data": {"reportData": {"report": None}}, "errors": [
+            {"message": "This report does not exist."}]})
     with pytest.raises(WCLError):
         WCLClient._unwrap({"errors": [{"message": "Internal server error"}]})
+    # A query mistake is our bug, not a private log.
+    with pytest.raises(WCLError) as err:
+        WCLClient._unwrap({"errors": [{"message": 'Value "X" does not exist in "EventDataType" enum.'}]})
+    assert not isinstance(err.value, ReportUnavailable)
     assert WCLClient._unwrap({"data": {"reportData": {"report": {"code": "x"}}}}) == {"code": "x"}
 
 

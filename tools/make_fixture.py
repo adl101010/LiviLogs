@@ -23,6 +23,7 @@ def anonymise(report: dict) -> dict:
     for key in ("dpsRankings", "hpsRankings"):
         for fight in (report.get(key) or {}).get("data", []):
             fight.pop("reportsBlacklistForCharacters", None)
+            fight.pop("guild", None)
             for role in fight.get("roles", {}).values():
                 for i, c in enumerate(role.get("characters", [])):
                     c["name"] = name(c["name"])

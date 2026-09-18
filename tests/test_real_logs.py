@@ -49,3 +49,15 @@ def test_classic_tbc():
     # One player died twice; five more died once. The five-way tie isn't worth listing.
     assert [(d.deaths, d.first_deaths) for d in recap.deaths] == [(2, 2)]
     assert everyone(data, "tanks") == [35.6, 33.9]
+
+
+def test_guild_heroic():
+    data = load("guild_heroic")
+    recap = build_recap(data, RecapSettings())
+    # WCL lists 105 players (everyone seen in the log); only the 16 in boss pulls are the raid.
+    assert len(data["masterData"]["actors"]) == 105
+    assert len(recap.players) == 16
+    assert (recap.difficulty, recap.kills, recap.wipes) == (4, 7, 11)
+    assert [p.average for p in recap.high] == [96.0]
+    assert [(p.average, p.role) for p in recap.grey] == [(20.9, "healers")]
+    assert [(d.deaths, d.first_deaths) for d in recap.deaths] == [(11, 5), (9, 1), (7, 1), (7, 0)]

@@ -1,25 +1,32 @@
-"""The Discord side: watches the logs channel, runs slash commands, posts recaps."""
+"""The Discord side: watches the logs channel, runs slash commands, posts reports."""
 
 import asyncio
 import logging
 import time
+from dataclasses import dataclass
 
 import discord
 import httpx
 from discord import app_commands
 
+from .awards import Line, boss_results, build_lines, winners_by_key
 from .config import Config
-from .recap import Char, build_recap, norm_realm
-from .render import render, split_message
+from .recap import Char, Night, analyze, norm_realm
+from .render import Rendered, mentioned_ids, render_report, split_message
 from .store import PendingReport, Store
 from .watch import check_ready
 from .wcl import ReportRef, ReportUnavailable, WCLClient, WCLError, find_report_links
 
 log = logging.getLogger("wcl-bot")
 
-# Recaps ping the people they name and nobody else: a character name can never become @everyone.
-USER_PINGS_ONLY = discord.AllowedMentions(everyone=False, roles=False, users=True, replied_user=False)
 NO_PINGS = discord.AllowedMentions.none()
+
+
+def pings_for(user_ids) -> discord.AllowedMentions:
+    """Ping exactly these users and nobody else: a character name can never become @everyone."""
+    return discord.AllowedMentions(
+        everyone=False, roles=False, replied_user=False, users=[discord.Object(i) for i in user_ids]
+    )
 
 PRIVATE_LOG = (
     "❌ I can't read <{url}>. It's probably uploaded as **Private**; "
@@ -42,6 +49,13 @@ def message_text(message: discord.Message) -> str:
         if embed.author:
             parts.append(embed.author.url)
     return "\n".join(p for p in parts if p)
+
+
+@dataclass
+class Built:
+    rendered: Rendered
+    night: Night
+    lines: list[Line]
 
 
 class RecapBot(discord.Client):
@@ -163,7 +177,7 @@ class RecapBot(discord.Client):
                 if not ready.ready and not timed_out:
                     log.info("%s not ready: %s", ref.url, ready.reason)
                     return
-                text, players = await self.build_message(ref)
+                built = await self.build_report(ref)
             except ReportUnavailable as e:
                 self.store.mark_failed(ref, str(e))
                 await self.send(pending.channel_id, pending.source_message_id, PRIVATE_LOG.format(url=ref.url))
@@ -180,37 +194,73 @@ class RecapBot(discord.Client):
                 return
 
             try:
-                await self.send(pending.channel_id, pending.source_message_id, text, pings=True)
+                await self.post_report(pending.channel_id, pending.source_message_id, built.rendered)
             except discord.HTTPException as e:
                 # Usually a missing permission in that channel. Retrying won't fix it.
-                log.error("Couldn't post the recap for %s in channel %s: %s", ref.url, pending.channel_id, e)
+                log.error("Couldn't post the report for %s in channel %s: %s", ref.url, pending.channel_id, e)
                 self.store.mark_failed(ref, f"Discord: {e}")
                 return
-            self.store.mark_posted(ref, players, pending.channel_id)
+            self.record(ref, built, pending.channel_id)
             await self._react_done(pending, "✅")
-            log.info("Posted recap for %s", ref.url)
+            log.info("Posted report for %s", ref.url)
         finally:
             self._busy.discard(ref)
 
-    async def build_message(self, ref: ReportRef) -> tuple[str, list[Char]]:
+    async def build_report(self, ref: ReportRef) -> Built:
         report = await self.wcl.report_full(ref, self.config.recap)
-        recap = build_recap(report, self.config.recap)
-        self.store.remember(recap.players)
-        text, _ = render(recap, ref.url, self.config.recap, self.store.user_for)
-        return text, recap.players
+        night = analyze(report, self.config.recap)
+        lines = build_lines(night, self.config.recap, self.store)  # the store remembers past nights
+        self.store.remember(night.roster)
+        rendered = render_report(
+            night, lines, ref.url, self.store.user_for, self.config.timezone, self.config.thread_ping_everyone
+        )
+        return Built(rendered, night, lines)
 
-    async def send(self, channel_id: int, reply_to: int | None, text: str, pings: bool = False) -> None:
+    def record(self, ref: ReportRef, built: Built, channel_id: int | None) -> None:
+        """Remember the night for next time ("last raid's best", "3 raids running")."""
+        self.store.save_history(ref, built.night.start_ms, boss_results(built.night), winners_by_key(built.lines))
+        self.store.mark_posted(ref, built.night.roster, channel_id)
+
+    async def post_report(self, channel_id: int, reply_to: int | None, rendered: Rendered) -> None:
+        """Headline in the channel (as a reply to the log link), full report in a thread under it.
+
+        The headline pings everyone it names. In the thread each person is pinged once, on their
+        first mention, so being in five callouts doesn't mean five notifications.
+        """
         channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
         reference = (
             discord.MessageReference(message_id=reply_to, channel_id=channel_id, fail_if_not_exists=False)
             if reply_to else None
         )
-        for i, chunk in enumerate(split_message(text)):
-            await channel.send(
-                chunk,
-                reference=reference if i == 0 else None,
-                allowed_mentions=USER_PINGS_ONLY if pings else NO_PINGS,
-            )
+        headline = None
+        for i, chunk in enumerate(split_message(rendered.headline)):
+            sent = await channel.send(chunk, reference=reference if i == 0 else None,
+                                      allowed_mentions=pings_for(mentioned_ids(chunk)))
+            headline = headline or sent
+        if not rendered.thread:
+            return
+
+        target = channel
+        if not isinstance(channel, discord.Thread):  # can't open a thread inside a thread
+            try:
+                target = await headline.create_thread(name=rendered.thread_title, auto_archive_duration=1440)
+            except discord.HTTPException as e:
+                log.warning("Couldn't open a thread (%s); posting the report in the channel instead", e)
+        pinged: set[int] = set()
+        for message in rendered.thread:
+            for chunk in split_message(message.text):
+                ids = [i for i in mentioned_ids(chunk) if i not in pinged] if message.pings else []
+                await target.send(chunk, allowed_mentions=pings_for(ids))
+                pinged.update(ids)
+
+    async def send(self, channel_id: int, reply_to: int | None, text: str) -> None:
+        """Plain notices (errors, "can't read this log"). They ping nobody."""
+        channel = self.get_channel(channel_id) or await self.fetch_channel(channel_id)
+        reference = (
+            discord.MessageReference(message_id=reply_to, channel_id=channel_id, fail_if_not_exists=False)
+            if reply_to else None
+        )
+        await channel.send(text, reference=reference, allowed_mentions=NO_PINGS)
 
     async def _react(self, channel, message_id: int, add: str | None = None, remove: str | None = None) -> None:
         try:
@@ -319,10 +369,13 @@ async def links_command(interaction: discord.Interaction, member: discord.Member
     await interaction.response.send_message(text, ephemeral=True)
 
 
-@app_commands.command(name="recap", description="Post a raid recap for a Warcraft Logs report right now")
-@app_commands.describe(link="The Warcraft Logs report link")
+@app_commands.command(name="recap", description="Post the raid report for a Warcraft Logs link right now")
+@app_commands.describe(
+    link="The Warcraft Logs report link",
+    record_only="Only add the night to history (for streaks and progress) without posting it",
+)
 @app_commands.guild_only()
-async def recap_command(interaction: discord.Interaction, link: str):
+async def recap_command(interaction: discord.Interaction, link: str, record_only: bool = False):
     bot = _bot(interaction)
     refs = find_report_links(link)
     if not refs:
@@ -331,22 +384,27 @@ async def recap_command(interaction: discord.Interaction, link: str):
     ref = refs[0]
     pending = bot.pending_for(ref)  # someone may have run /recap while the auto-post was waiting
     if ref in bot._busy:
-        await interaction.response.send_message("I'm already posting a recap for that log.", ephemeral=True)
+        await interaction.response.send_message("I'm already working on that log.", ephemeral=True)
         return
-    await interaction.response.defer(thinking=True)
+    await interaction.response.defer(ephemeral=True, thinking=True)
     bot._busy.add(ref)
     try:
-        text, players = await bot.build_message(ref)
+        built = await bot.build_report(ref)
+        if not record_only:
+            await bot.post_report(interaction.channel_id, None, built.rendered)
     except ReportUnavailable:
-        await interaction.followup.send(PRIVATE_LOG.format(url=ref.url))
+        await interaction.followup.send(PRIVATE_LOG.format(url=ref.url), ephemeral=True)
         return
     except (WCLError, httpx.HTTPError) as e:
-        await interaction.followup.send(f"❌ Couldn't get that log from Warcraft Logs: {e}")
+        await interaction.followup.send(f"❌ Couldn't get that log from Warcraft Logs: {e}", ephemeral=True)
+        return
+    except discord.HTTPException as e:
+        await interaction.followup.send(f"❌ Couldn't post in this channel: {e}", ephemeral=True)
         return
     finally:
         bot._busy.discard(ref)
-    for chunk in split_message(text):
-        await interaction.followup.send(chunk, allowed_mentions=USER_PINGS_ONLY)
-    bot.store.mark_posted(ref, players, interaction.channel_id)
+    bot.record(ref, built, interaction.channel_id)
     if pending:
         await bot._react_done(pending, "✅")
+    done = "Added that night to history without posting it." if record_only else "Posted."
+    await interaction.followup.send(done, ephemeral=True)

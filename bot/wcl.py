@@ -60,32 +60,38 @@ query Status($code: String!) {
 }
 """
 
-# DPS and tanks are ranked on damage, healers on healing. WCL's default ranks everyone on damage,
-# which would put nearly every healer in the grey list, so both are fetched explicitly.
-# Deaths come from the events feed, not the deaths table: the table silently stops at 200 deaths.
+# Event times are milliseconds from the start of the report; this is "until the end".
+_END = "1000000000000"
+_WHOLE_NIGHT = f"killType: Encounters, startTime: 0, endTime: {_END}"
+
+# One query for the whole report.
+# - DPS and tanks are ranked on damage, healers on healing. WCL's default ranks everyone on damage,
+#   which would put nearly every healer in the grey list, so both are fetched explicitly.
+# - Deaths come from the events feed, not the deaths table: the table silently stops at 200.
+# - Wipes have no parses, so prog nights use the damage/healing tables instead.
 _FULL_QUERY = """
 query Recap($code: String!, $deathsKillType: KillType) {
   reportData {
     report(code: $code) {
       code title startTime endTime segments exportedSegments visibility
       zone { id name }
-      fights(killType: Encounters) { id encounterID name kill difficulty size startTime endTime friendlyPlayers }
-      masterData { actors(type: "Player") { id name server subType } }
+      fights(killType: Encounters) {
+        id encounterID name kill difficulty size startTime endTime
+        bossPercentage fightPercentage lastPhase friendlyPlayers
+      }
+      masterData { actors(type: "Player") { id name server subType } abilities { gameID name } }
       dpsRankings: rankings(playerMetric: dps%(rankings_args)s)
       hpsRankings: rankings(playerMetric: hps%(rankings_args)s)
+      playerDetails(%(night)s, includeCombatantInfo: false)
+      damageDone: table(dataType: DamageDone, %(night)s)
+      healing: table(dataType: Healing, %(night)s)
+      damageTaken: table(dataType: DamageTaken, %(night)s)
+      interrupts: table(dataType: Interrupts, %(night)s)
+      dispels: table(dataType: Dispels, %(night)s)
       deathEvents: events(dataType: Deaths, killType: $deathsKillType, startTime: 0, endTime: %(end)s, limit: 10000) {
         data nextPageTimestamp
       }
-    }
-  }
-}
-"""
-
-_MORE_DEATHS_QUERY = """
-query MoreDeaths($code: String!, $deathsKillType: KillType, $start: Float!) {
-  reportData {
-    report(code: $code) {
-      deathEvents: events(dataType: Deaths, killType: $deathsKillType, startTime: $start, endTime: %(end)s, limit: 10000) {
+      resurrectEvents: events(filterExpression: "type = 'resurrect'", %(night)s, limit: 10000) {
         data nextPageTimestamp
       }
     }
@@ -93,8 +99,26 @@ query MoreDeaths($code: String!, $deathsKillType: KillType, $start: Float!) {
 }
 """
 
-# Event times are milliseconds from the start of the report; this is "until the end".
-_END = "1000000000000"
+# Follow-up pages for either events feed (only on enormous nights: 10,000 per page).
+_MORE_EVENTS_QUERY = """
+query MoreEvents(%(params)s) {
+  reportData {
+    report(code: $code) {
+      page: events(%(filter)s, startTime: $start, endTime: %(end)s, limit: 10000) { data nextPageTimestamp }
+    }
+  }
+}
+"""
+_EVENT_PAGES = {
+    "deathEvents": {
+        "params": "$code: String!, $start: Float!, $deathsKillType: KillType",
+        "filter": "dataType: Deaths, killType: $deathsKillType",
+    },
+    "resurrectEvents": {
+        "params": "$code: String!, $start: Float!",
+        "filter": "filterExpression: \"type = 'resurrect'\", killType: Encounters",
+    },
+}
 
 
 def _rankings_args(settings: RecapSettings) -> str:
@@ -175,17 +199,26 @@ class WCLClient:
         return await self.query(ref.host, _STATUS_QUERY, {"code": ref.code})
 
     async def report_full(self, ref: ReportRef, settings: RecapSettings) -> dict:
-        query = _FULL_QUERY % {"rankings_args": _rankings_args(settings), "end": _END}
+        query = _FULL_QUERY % {"rankings_args": _rankings_args(settings), "end": _END, "night": _WHOLE_NIGHT}
         variables = {"code": ref.code, "deathsKillType": "All" if settings.deaths_include_trash else "Encounters"}
         report = await self.query(ref.host, query, variables)
-
-        page = report.pop("deathEvents", None) or {}
-        deaths = list(page.get("data") or [])
-        while page.get("nextPageTimestamp") is not None:
-            more = await self.query(
-                ref.host, _MORE_DEATHS_QUERY % {"end": _END}, {**variables, "start": page["nextPageTimestamp"]}
-            )
-            page = more.get("deathEvents") or {}
-            deaths += page.get("data") or []
-        report["deaths"] = deaths
+        report["deaths"] = await self._all_events(ref, report.pop("deathEvents", None), "deathEvents", variables)
+        report["resurrects"] = await self._all_events(
+            ref, report.pop("resurrectEvents", None), "resurrectEvents", variables
+        )
         return report
+
+    async def _all_events(self, ref: ReportRef, page: dict | None, field: str, variables: dict) -> list:
+        page = page or {}
+        events = list(page.get("data") or [])
+        spec = _EVENT_PAGES[field]
+        while page.get("nextPageTimestamp") is not None:
+            wanted = {k: v for k, v in variables.items() if f"${k}" in spec["params"]}
+            more = await self.query(
+                ref.host,
+                _MORE_EVENTS_QUERY % {**spec, "end": _END},
+                {**wanted, "start": page["nextPageTimestamp"]},
+            )
+            page = more.get("page") or {}
+            events += page.get("data") or []
+        return events

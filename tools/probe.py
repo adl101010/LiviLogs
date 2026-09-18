@@ -1,12 +1,13 @@
-"""Pull a real log through the API and show what the bot would post. No Discord needed.
+"""Pull real logs through the API and print the report the bot would post. No Discord needed.
 
-    python -m tools.probe <warcraftlogs report link> [more links...]
+    python -m tools.probe <warcraftlogs link> [more links...] [--compare]
 
-Reads WCL_CLIENT_ID / WCL_CLIENT_SECRET from .env. For each log it:
-  1. prints each player's night average under every rankings option WCL offers, side by side,
-     so they can be compared with the report page to pick the one that matches the site;
-  2. prints the recap exactly as the bot would post it (with nobody linked);
-  3. saves the raw JSON to tools/probe-out/ for building test fixtures.
+Reads WCL_CLIENT_ID / WCL_CLIENT_SECRET (and optionally TIMEZONE) from .env. With several links,
+the nights are replayed oldest first into a throwaway history, so later reports show "last raid's
+best" and "N raids running" the way the bot would. Nobody is linked, so names print in bold.
+
+--compare also prints each player's night average under both WCL parse comparisons (Rankings and
+Parses), for checking against the report page. Raw JSON is saved to tools/probe-out/.
 """
 
 import asyncio
@@ -16,20 +17,15 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from bot.config import RecapSettings
-from bot.recap import build_recap
-from bot.render import render
+from bot.awards import boss_results, build_lines, winners_by_key
+from bot.config import RecapSettings, _zone
+from bot.recap import analyze
+from bot.render import render_report
+from bot.store import Store
 from bot.wcl import WCLClient, find_report_links
 
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "tools" / "probe-out"
-
-# timeframe=Historical is left out: on current-tier logs WCL returns "-" for everyone.
-VARIANTS = {
-    "API default": RecapSettings(),
-    "Parses": RecapSettings(compare="Parses"),
-    "Rankings": RecapSettings(compare="Rankings"),
-}
 
 
 def load_env() -> None:
@@ -42,59 +38,57 @@ def load_env() -> None:
             os.environ.setdefault(key.strip(), value.strip().strip('"').strip("'"))
 
 
-async def probe(url: str) -> None:
-    refs = find_report_links(url)
-    if not refs:
-        print(f"Not a report link: {url}")
-        return
-    ref = refs[0]
+async def compare(wcl: WCLClient, ref, settings: RecapSettings) -> None:
+    averages: dict[str, dict[str, float]] = {}
+    for label in ("Rankings", "Parses"):
+        report = await wcl.report_full(ref, replace(settings, compare=label))
+        for p in analyze(report, settings).parses:
+            averages.setdefault(p.char.label, {})[label] = p.average
+    print(f"\n{'Character':<28}{'Rankings':>10}{'Parses':>10}")
+    for char, row in sorted(averages.items(), key=lambda kv: -kv[1].get("Rankings", 0)):
+        print(f"{char:<28}{row.get('Rankings', float('nan')):>10.1f}{row.get('Parses', float('nan')):>10.1f}")
+
+
+async def main(urls: list[str], show_compare: bool) -> None:
+    settings = RecapSettings.from_env()
+    tz = _zone("TIMEZONE")
     wcl = WCLClient()
+    history = Store(":memory:")
     try:
-        settings = RecapSettings.from_env()
-        averages: dict[str, dict[str, float]] = {}
-        roles: dict[str, str] = {}
-        default_report = None
-        for label, variant in VARIANTS.items():
-            variant = replace(settings, compare=variant.compare, timeframe=variant.timeframe)
-            report = await wcl.report_full(ref, variant)
-            default_report = default_report or report
+        nights = []
+        for url in urls:
+            refs = find_report_links(url)
+            if not refs:
+                print(f"Not a report link: {url}")
+                continue
+            ref = refs[0]
+            report = await wcl.report_full(ref, settings)
             out = OUT / ref.code
             out.mkdir(parents=True, exist_ok=True)
-            (out / f"{label.replace('/', '-').replace(' ', '_')}.json").write_text(json.dumps(report, indent=2))
-            # Everyone, not just the callouts: compare every row with the site.
-            recap = build_recap(report, replace(variant, parse_high=-1))
-            for p in recap.high:
-                averages.setdefault(p.char.label, {})[label] = p.average
-                roles[p.char.label] = p.role
+            (out / "full.json").write_text(json.dumps(report, ensure_ascii=False), encoding="utf-8")
+            nights.append((ref, analyze(report, settings)))
 
-        print(f"\n=== {ref.url}")
-        print(f"visibility={default_report.get('visibility')} segments={default_report.get('exportedSegments')}"
-              f"/{default_report.get('segments')} zone={(default_report.get('zone') or {}).get('name')}\n")
-        header = f"{'Character':<28}{'role':<8}" + "".join(f"{label:>16}" for label in VARIANTS)
-        print(header)
-        print("-" * len(header))
-        for char in sorted(averages, key=lambda c: -averages[c].get("API default", 0)):
-            row = f"{char:<28}{roles[char]:<8}"
-            row += "".join(f"{averages[char].get(label, float('nan')):>16.1f}" for label in VARIANTS)
-            print(row)
+        for ref, night in sorted(nights, key=lambda rn: rn[1].start_ms):
+            lines = build_lines(night, settings, history)
+            rendered = render_report(night, lines, ref.url, lambda c: None, tz)
+            history.save_history(ref, night.start_ms, boss_results(night), winners_by_key(lines))
 
-        recap = build_recap(default_report, settings)
-        text, _ = render(recap, ref.url, settings, lambda c: None)
-        print("\n--- The bot would post (nobody linked yet):\n")
-        print(text)
-        print(f"\nRaw JSON saved to {OUT / ref.code}")
+            print(f"\n{'=' * 100}\n{ref.url}  (thread: {rendered.thread_title})\n{'=' * 100}")
+            print(rendered.headline)
+            for message in rendered.thread:
+                print(f"\n----- thread message ({len(message.text)} chars) -----")
+                print(message.text)
+            if show_compare:
+                await compare(wcl, ref, settings)
+        print(f"\nRaw JSON saved under {OUT}")
     finally:
         await wcl.close()
 
 
-async def main(urls: list[str]) -> None:
-    for url in urls:
-        await probe(url)
-
-
 if __name__ == "__main__":
-    if len(sys.argv) < 2:
+    args = [a for a in sys.argv[1:] if a != "--compare"]
+    if not args:
         sys.exit(__doc__)
     load_env()
     sys.stdout.reconfigure(encoding="utf-8")
-    asyncio.run(main(sys.argv[1:]))
+    asyncio.run(main(args, "--compare" in sys.argv))

@@ -1,63 +1,103 @@
-"""Real logs pulled through the API on 2026-09-18 (names replaced by tools/make_fixture.py).
+"""Real logs pulled through the API on 2026-09-18, names replaced by tools/make_fixture.py.
 
 They pin the real JSON shape: if WCL changes it, or a change here breaks reading it, these fail.
-The expected numbers are what the bot produced after checking the logic against the raw data.
+guild_kill and guild_prog are one guild's consecutive nights (Sep 15 and 16), so they also test
+history: "last raid's best" and "2 raids running".
 """
 
 import json
 from pathlib import Path
 
+from bot.awards import boss_results, build_lines, winners_by_key
 from bot.config import RecapSettings
-from bot.recap import build_recap
+from bot.recap import analyze
+from bot.render import render_report
+from bot.store import Store
+from bot.wcl import ReportRef
 
 FIXTURES = Path(__file__).parent / "fixtures"
+SETTINGS = RecapSettings()
 
 
 def load(name):
     return json.loads((FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
 
 
-def everyone(report, role):
-    recap = build_recap(report, RecapSettings(parse_high=-1))
-    return sorted((p.average for p in recap.high if p.role == role), reverse=True)
+def text_of(night, history=None):
+    lines = build_lines(night, SETTINGS, history)
+    r = render_report(night, lines, "u", lambda c: None)
+    return r, "\n".join([r.headline] + [m.text for m in r.thread]), lines
 
 
-def test_retail_heroic():
-    data = load("retail_heroic")
-    recap = build_recap(data, RecapSettings())
-    assert (recap.zone, recap.difficulty, recap.kills, recap.wipes) == ("The Venomous Abyss", 4, 8, 7)
-    assert [p.average for p in recap.high] == [93.9, 93.7, 92.8]
-    assert len(recap.grey) == 16 and all(p.role != "tanks" for p in recap.grey)
-    assert [(d.deaths, d.first_deaths) for d in recap.deaths] == [(6, 3), (6, 1), (4, 0), (4, 0)]
-    # Healers ranked on healing: on damage every one of them would be near the bottom.
-    assert everyone(data, "healers") == [66.0, 37.9, 35.6, 32.5, 32.5, 28.4]
+def test_guild_kill_night():
+    data = load("guild_kill")
+    night = analyze(data, SETTINGS)
+    # WCL lists 105 players (everyone seen in the log); only the 16 in boss pulls are the raid.
+    assert len(data["masterData"]["actors"]) == 105 and len(night.roster) == 16
+    assert (night.difficulty, night.kills, night.wipes) == (4, 7, 11)
+    assert [p.average for p in night.high] == [96.0]
+    assert [(p.average, p.role) for p in night.grey] == [(20.9, "healers")]
+    assert [(d.deaths, d.first_deaths) for d in night.floor] == [(11, 5), (9, 1), (7, 1), (7, 0)]
+
+    r, text, _ = text_of(night)
+    assert "7 bosses down · 18 pulls · 2h 27m" in r.headline
+    assert "📈 **Ula'tek:** 8 wipes, best P3 at 44%" in r.headline
+    assert "wiped with the boss at **1.5%** in P3" in text  # The Coiled Altar
+    assert "🦶 **Kick captain:**" in text and "17 interrupts (next best: 8)" in text
+    assert "🧼 **Dispel machine:**" in text and "177 dispels" in text
+    assert "72M damage (3× the next healer) with a 20.9 healing parse" in text
+    assert "🎁 **Couldn't wait for loot:**" in text and "3 deaths each on kills" in text
+    assert "Nemesis" not in text  # a three-way tie at 3: nobody stands out
+
+
+def test_guild_prog_night():
+    night = analyze(load("guild_prog"), SETTINGS)
+    assert (night.kills, night.wipes, len(night.roster)) == (0, 18, 19)
+    assert not night.has_parses
+    r, text, _ = text_of(night)
+    assert r.headline.startswith("📜 **Prog report** · Ula'tek · Heroic")
+    assert "📈 **Best pull:** P3 at 5.1% (the last pull of the night)" in r.headline
+    assert "215k · **Top healer:**" in r.headline and "268k HPS" in r.headline
+    assert "`▇▅▅▄▅▅▃▄▃▃▇▂▂▂▂▇▅▁`" in text
+    assert "Reached P3 on 10 of 18 pulls" in text
+    assert "(6 pulls)" in text and "(12 pulls)" in text  # people who sat out, not made to look bad
+    assert "38 interrupts (next best: 21)" in text
+    assert "9 battle rezzes" in text
+    assert "died to Necrotic Vapors 6 times" in text
+
+
+def test_consecutive_nights_build_history():
+    store = Store(":memory:")
+    for name in ("guild_kill", "guild_prog"):
+        night = analyze(load(name), SETTINGS)
+        r, text, lines = text_of(night, store)
+        store.save_history(ReportRef("www.warcraftlogs.com", name), night.start_ms, boss_results(night),
+                           winners_by_key(lines))
+    assert "· last raid's best: P3 at 44%" in r.headline
+    assert "(10 deaths, 2 raids running)" in r.headline  # floor inspector both nights
+    assert "9 battle rezzes (2 raids running)" in text
+    assert "(1.5× the next healer, 2 raids running)" in text
+
+
+def test_classic_tbc():
+    night = analyze(load("classic_tbc"), SETTINGS)
+    assert (night.zone, night.difficulty, night.kills, night.wipes) == ("ZA / SWP", 3, 12, 0)
+    assert len(night.roster) == 25
+    assert [p.average for p in night.grey] == [4.9, 12.8, 20.0, 23.2, 24.6]
+    r, text, _ = text_of(night)
+    assert "12 bosses down" in r.headline
+    assert "🧼 **Dispel machine:**" in text
+
+
+def test_old_shape_without_new_fields_still_works():
+    # An earlier fixture from before the report grew: no friendlyPlayers, tables or player details.
+    night = analyze(load("retail_heroic"), SETTINGS)
+    assert [p.average for p in night.high] == [93.9, 93.7, 92.8]
+    assert len(night.grey) == 16
+    r, text, _ = text_of(night)
+    assert "Top DPS" in r.headline and "Floor inspector" in text
 
 
 def test_retail_death_events_are_all_there():
     # The deaths *table* stops at 200; the events feed returned all 223 for this log.
     assert len(load("retail_heroic")["deaths"]) == 223
-
-
-def test_classic_tbc():
-    data = load("classic_tbc")
-    recap = build_recap(data, RecapSettings())
-    assert (recap.zone, recap.difficulty, recap.kills, recap.wipes) == ("ZA / SWP", 3, 7, 0)
-    assert recap.high == []
-    assert [(p.average, p.role) for p in recap.grey] == [
-        (6.2, "healers"), (11.1, "dps"), (21.2, "dps"), (23.1, "healers"),
-    ]
-    # One player died twice; five more died once. The five-way tie isn't worth listing.
-    assert [(d.deaths, d.first_deaths) for d in recap.deaths] == [(2, 2)]
-    assert everyone(data, "tanks") == [35.6, 33.9]
-
-
-def test_guild_heroic():
-    data = load("guild_heroic")
-    recap = build_recap(data, RecapSettings())
-    # WCL lists 105 players (everyone seen in the log); only the 16 in boss pulls are the raid.
-    assert len(data["masterData"]["actors"]) == 105
-    assert len(recap.players) == 16
-    assert (recap.difficulty, recap.kills, recap.wipes) == (4, 7, 11)
-    assert [p.average for p in recap.high] == [96.0]
-    assert [(p.average, p.role) for p in recap.grey] == [(20.9, "healers")]
-    assert [(d.deaths, d.first_deaths) for d in recap.deaths] == [(11, 5), (9, 1), (7, 1), (7, 0)]

@@ -1,0 +1,505 @@
+"""The night -> the lines of the report: headline callouts, awards, and the night summary.
+
+Every award checks whether tonight gives it something worth saying and stays silent otherwise, so
+the report is as long as the night was eventful. Lines hold Chars rather than names; the renderer
+turns those into Discord mentions.
+"""
+
+import math
+import re
+from collections import Counter
+from dataclasses import dataclass, field
+from typing import Protocol
+
+from .config import RecapSettings
+from .recap import DPS, HEALER, TANK, Boss, Char, Night, ParseLine
+
+HEADLINE = "headline"
+NIGHT = "night"
+BOARD = "board"
+HIGHLIGHTS = "highlights"
+LOWLIGHTS = "lowlights"
+DEATHS = "deaths"
+
+Part = str | Char
+
+
+@dataclass
+class Line:
+    section: str
+    parts: list[Part]
+    key: str | None = None  # awards remember their winners, for "3 raids running"
+    winners: list[Char] = field(default_factory=list)
+    group: str | None = None  # consecutive lines in the same group share one line in Discord
+
+
+@dataclass(frozen=True)
+class BossResult:
+    killed: bool
+    boss_pct: float | None
+    phase: int | None
+
+
+class History(Protocol):
+    def last_result(self, encounter_id: int, difficulty: int | None, before_ms: int) -> BossResult | None: ...
+
+    def streak(self, key: str, char: Char, before_ms: int) -> int: ...
+
+
+class NoHistory:
+    def last_result(self, encounter_id, difficulty, before_ms):
+        return None
+
+    def streak(self, key, char, before_ms):
+        return 0
+
+
+# --- formatting --------------------------------------------------------------------------------
+
+
+def fmt_rate(value: float) -> str:
+    if value >= 1_000_000:
+        return f"{value / 1_000_000:.1f}M"
+    if value >= 1_000:
+        return f"{value / 1_000:.0f}k"
+    return f"{value:.0f}"
+
+
+def fmt_big(value: float) -> str:
+    return f"{value / 1_000_000:.0f}M" if value >= 1_000_000 else fmt_rate(value)
+
+
+def fmt_pct(pct: float) -> str:
+    """Near a kill every tenth counts (1.5%, not 2%); further out, whole numbers."""
+    return f"{pct:.1f}".rstrip("0").rstrip(".") if pct < 10 else f"{pct:.0f}"
+
+
+def fmt_health(pct: float | None, phase: int | None) -> str:
+    """How close a wipe got, the way raiders say it: "P3 at 5%"."""
+    if pct is None:
+        return "unknown"
+    return f"P{phase} at {fmt_pct(pct)}%" if phase and phase > 1 else f"{fmt_pct(pct)}%"
+
+
+def fmt_duration(seconds: float) -> str:
+    minutes = int(round(seconds / 60))
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m" if hours else f"{minutes}m"
+
+
+def ability_name(name: str) -> str:
+    return "boss melee" if name.lower() == "melee" else name
+
+
+def times(n: int) -> str:
+    return {1: "once", 2: "twice"}.get(n, f"{n} times")
+
+
+def plural(n: int, word: str) -> str:
+    return f"{n} {word}" if n == 1 else f"{n} {word}s"
+
+
+def joined(chars: list[Char]) -> list[Part]:
+    """[a] / [a, " and ", b] / [a, ", ", b, " and ", c]"""
+    parts: list[Part] = []
+    for i, c in enumerate(chars):
+        if i:
+            parts.append(" and " if i == len(chars) - 1 else ", ")
+        parts.append(c)
+    return parts
+
+
+def leaders(counts: Counter, minimum: float, max_names: int = 3) -> tuple[list[Char], float]:
+    """Everyone tied for first, if first is at least `minimum` and the tie isn't a crowd."""
+    if not counts:
+        return [], 0
+    top = max(counts.values())
+    names = sorted((c for c, v in counts.items() if v == top), key=lambda c: c.name.casefold())
+    if top < minimum or len(names) > max_names:
+        return [], 0
+    return names, top
+
+
+# WCL's parse colours, for the leaderboard.
+def parse_colour(pct: float) -> str:
+    if pct >= 100:
+        return "🟨"
+    if pct >= 99:
+        return "🩷"
+    if pct >= 95:
+        return "🟧"
+    if pct >= 75:
+        return "🟪"
+    if pct >= 50:
+        return "🟦"
+    if pct >= 25:
+        return "🟩"
+    return "⬜"
+
+
+ROLE_EMOJI = {DPS: "⚔️", HEALER: "💚", TANK: "🛡️"}
+_RUNNING = re.compile(r"^ \((\d+ raids running)\)$")
+PHASE_BARS = "▁▂▃▄▅▆▇█"
+
+
+class Builder:
+    def __init__(self, night: Night, settings: RecapSettings, history: History):
+        self.night = night
+        self.settings = settings
+        self.history = history
+        self.lines: list[Line] = []
+
+    def add(self, section: str, parts: list[Part], key: str | None = None,
+            winners: list[Char] | None = None, group: str | None = None) -> None:
+        # "(10 deaths) (2 raids running)" reads better as "(10 deaths, 2 raids running)".
+        merged: list[Part] = []
+        for part in parts:
+            match = _RUNNING.match(part) if isinstance(part, str) else None
+            if match and merged and isinstance(merged[-1], str) and merged[-1].endswith(")"):
+                merged[-1] = f"{merged[-1][:-1]}, {match.group(1)})"
+            elif part != "":
+                merged.append(part)
+        self.lines.append(Line(section, merged, key, winners or [], group))
+
+    def running(self, key: str, char: Char) -> str:
+        streak = self.history.streak(key, char, self.night.start_ms)
+        return f" ({streak + 1} raids running)" if streak else ""
+
+    # --- headline ------------------------------------------------------------------------------
+
+    def headline(self) -> None:
+        night = self.night
+        unkilled = [b for b in night.bosses if not b.killed and b.wipes]
+        prog_night = not night.kills
+        for boss in unkilled:
+            best = boss.best_wipe
+            last_note = self.last_raid(boss)
+            if prog_night and len(unkilled) == 1:
+                final = " (the last pull of the night)" if best is boss.pulls[-1] and len(boss.pulls) > 1 else ""
+                self.add(HEADLINE, [f"📈 **Best pull:** {fmt_health(best.boss_pct, best.phase)}{final}{last_note}"])
+            else:
+                best_text = f", best {fmt_health(best.boss_pct, best.phase)}" if best else ""
+                self.add(HEADLINE, [f"📈 **{boss.name}:** {plural(len(boss.wipes), 'wipe')}{best_text}{last_note}"])
+
+        if night.has_parses:
+            for role, title, key in ((DPS, "Top DPS", "top_dps"), (HEALER, "Top healer", "top_healer"),
+                                     (TANK, "Top tank", "top_tank")):
+                lines = [p for p in night.parses if p.role == role]
+                if lines:
+                    best = max(p.average for p in lines)
+                    top = [p.char for p in lines if p.average == best]
+                    self.top_line(title, key, top, f"{best:.1f}")
+        else:
+            for role, title, key, unit in ((DPS, "Top DPS", "top_dps", ""), (HEALER, "Top healer", "top_healer", " HPS")):
+                rates = [r for r in night.rates if r.role == role]
+                if rates:
+                    self.top_line(title, key, [rates[0].char], f"{fmt_rate(rates[0].per_second)}{unit}")
+
+        if night.high:
+            self.add(HEADLINE, [f"🌟 **{self.settings.parse_high:g}+:** ", *self.parse_list(night.high, "high")],
+                     "high", [p.char for p in night.high])
+        if night.grey:
+            self.add(HEADLINE, ["🗑️ **Grey:** ", *self.parse_list(night.grey, "grey")], "grey",
+                     [p.char for p in night.grey])
+        top = [d for d in night.floor if d.deaths == night.floor[0].deaths] if night.floor else []
+        if top and top[0].deaths >= 2:
+            each = " each" if len(top) > 1 else ""
+            self.add(HEADLINE, ["💀 **Floor inspector:** ", *joined([d.char for d in top]),
+                                f" ({top[0].deaths} deaths{each})",
+                                self.running("floor", top[0].char) if len(top) == 1 else ""],
+                     "floor", [d.char for d in top])
+
+    def top_line(self, title: str, key: str, chars: list[Char], value: str) -> None:
+        first = not any(line.group == "tops" for line in self.lines)
+        parts: list[Part] = ["🏆 " if first else "", f"**{title}:** ", *joined(chars), f" {value}"]
+        if len(chars) == 1:
+            parts.append(self.running(key, chars[0]))
+        self.add(HEADLINE, parts, key, chars, group="tops")
+
+    def parse_list(self, lines: list[ParseLine], key: str) -> list[Part]:
+        parts: list[Part] = []
+        for i, p in enumerate(lines):
+            if i:
+                parts.append(" · ")
+            kind = "healing" if p.role == HEALER else "damage"
+            streak = self.history.streak(key, p.char, self.night.start_ms)
+            running = f", {streak + 1} raids running" if streak else ""
+            parts += [p.char, f" ({kind} {p.average:.1f}{running})"]
+        return parts
+
+    def last_raid(self, boss: Boss) -> str:
+        last = self.history.last_result(boss.encounter_id, boss.difficulty, self.night.start_ms)
+        if last is None:
+            return ""
+        if last.killed:
+            return " · killed it last raid"
+        return f" · last raid's best: {fmt_health(last.boss_pct, last.phase)}"
+
+    # --- the night -----------------------------------------------------------------------------
+
+    def the_night(self) -> None:
+        night = self.night
+        for boss in night.bosses:
+            if boss.killed:
+                pulls = "first pull" if len(boss.pulls) == 1 else f"{len(boss.pulls)} pulls"
+                self.add(NIGHT, [f"✅ {boss.name}, {pulls}"])
+            else:
+                best = boss.best_wipe
+                best_text = f", best {fmt_health(best.boss_pct, best.phase)}" if best else ""
+                self.add(NIGHT, [f"❌ {boss.name}, {plural(len(boss.wipes), 'wipe')}{best_text}"])
+
+        for boss in night.bosses:
+            if len(boss.pulls) >= 5 and all(p.boss_pct is not None for p in boss.pulls):
+                bars = "".join(PHASE_BARS[min(7, max(0, math.ceil(p.boss_pct / 12.5) - 1))] for p in boss.pulls)
+                self.add(NIGHT, [f"`{bars}` {boss.name} health by pull (shorter bar = closer to a kill)"])
+            phases = [p.phase for p in boss.wipes if p.phase]
+            if not boss.killed and len(boss.wipes) >= 3 and phases and max(phases) > 1:
+                top = max(phases)
+                self.add(NIGHT, [f"Reached P{top} on {phases.count(top)} of {len(boss.wipes)} pulls"])
+
+        if night.pulls:
+            self.add(NIGHT, [f"🕒 {fmt_duration(night.boss_seconds)} on bosses across a "
+                             f"{fmt_duration(night.span_seconds)} night"])
+
+        close = [(b, b.best_wipe) for b in night.bosses if b.killed and b.best_wipe]
+        close = [(b, w) for b, w in close if w.boss_pct is not None and w.boss_pct <= 10]
+        if close:
+            boss, wipe = min(close, key=lambda bw: bw[1].boss_pct)
+            phase = f" in P{wipe.phase}" if wipe.phase and wipe.phase > 1 else ""
+            self.add(NIGHT, [f"💔 **Heartbreaker:** {boss.name} wiped with the boss at **{fmt_pct(wipe.boss_pct)}%**"
+                             f"{phase}, before going down"])
+
+        wiped = [b for b in night.bosses if len(b.wipes) >= 3]
+        if len(night.bosses) >= 2 and wiped:
+            wall = max(wiped, key=lambda b: len(b.wipes))
+            self.add(NIGHT, [f"🧱 **Wall of the night:** {wall.name}, {len(wall.wipes)} wipes"])
+
+        killers = Counter(d.ability for ds in night.counted.values() for d in ds if d.ability)
+        if killers:
+            name, n = killers.most_common(1)[0]
+            if n >= 5:
+                self.add(NIGHT, [f"☠️ **Raid's nemesis:** {ability_name(name)}, {n} deaths"])
+        starters = Counter(ds[0].ability for ds in night.counted.values() if ds and ds[0].ability)
+        if starters:
+            name, n = starters.most_common(1)[0]
+            if n >= 3:
+                self.add(NIGHT, [f"🧨 **Wipe starter:** {ability_name(name)} caused the first death on {n} pulls"])
+
+    # --- leaderboard ---------------------------------------------------------------------------
+
+    def board(self) -> None:
+        night = self.night
+        total_pulls = len(night.pulls)
+        for role in (DPS, HEALER, TANK):
+            parts: list[Part] = [f"{ROLE_EMOJI[role]} "]
+            if night.has_parses:
+                entries = sorted((p for p in night.parses if p.role == role), key=lambda p: -p.average)
+                colour = None
+                for i, p in enumerate(entries):
+                    if i:
+                        parts.append(" · ")
+                    now = parse_colour(p.average)
+                    parts.append(("👑 " if i == 0 else "") + (f"{now} " if now != colour else ""))
+                    parts += [p.char, f" {p.average:.1f}"]
+                    colour = now
+            else:
+                entries = [r for r in night.rates if r.role == role]
+                for i, r in enumerate(entries):
+                    if i:
+                        parts.append(" · ")
+                    missed = f" ({r.pulls} pulls)" if r.pulls < total_pulls else ""
+                    parts += ["👑 " if i == 0 else "", r.char, f" {fmt_rate(r.per_second)}{missed}"]
+            if entries:
+                self.add(BOARD, parts)
+
+    # --- highlights ----------------------------------------------------------------------------
+
+    def highlights(self) -> None:
+        night = self.night
+        pinks = [(p, [(pct, boss) for pct, boss in p.parses if pct >= 99]) for p in night.parses]
+        pinks = [(p, hits) for p, hits in pinks if hits]
+        if pinks:
+            gold = any(pct >= 100 for _, hits in pinks for pct, _ in hits)
+            parts: list[Part] = ["🟨 **Gold parse:** " if gold else "🩷 **Pink parse:** "]
+            for i, (p, hits) in enumerate(sorted(pinks, key=lambda ph: -len(ph[1]))):
+                if i:
+                    parts.append("; ")
+                by_value: dict[int, list[str]] = {}
+                for pct, boss in hits:
+                    by_value.setdefault(int(pct), []).append(boss)
+                text = ", ".join(f"{v} on {' and '.join(dict.fromkeys(bosses))}" for v, bosses in sorted(by_value.items(), reverse=True))
+                parts += [p.char, f", {text}"]
+            self.add(HIGHLIGHTS, parts, "pink", [p.char for p, _ in pinks])
+
+        steady = [p for p in night.parses if p.kills >= 4]
+        spreads = [(max(v for v, _ in p.parses) - min(v for v, _ in p.parses), p) for p in steady]
+        spreads = [(s, p) for s, p in spreads if s <= 15 and p.average >= 50]
+        if spreads:
+            s, p = min(spreads, key=lambda sp: (sp[0], -sp[1].average))
+            lo, hi = min(v for v, _ in p.parses), max(v for v, _ in p.parses)
+            self.add(HIGHLIGHTS, ["🎵 **Metronome:** ", p.char, f", {lo:.0f} to {hi:.0f} on every boss",
+                                  self.running("metronome", p.char)], "metronome", [p.char])
+
+        self.counter_award(HIGHLIGHTS, "kick", "🦶 **Kick captain:** ", night.interrupts, 5, "interrupt", next_best=True)
+        self.counter_award(HIGHLIGHTS, "dispel", "🧼 **Dispel machine:** ", night.dispels, 10, "dispel")
+        self.counter_award(HIGHLIGHTS, "necromancer", "🪄 **Necromancer:** ", night.brez_given, 3, "battle rez", "battle rezzes")
+
+        last: Counter = Counter()
+        wipes_with_deaths = 0
+        for pull in night.pulls:
+            deaths = night.deaths.get(pull.id)
+            if not pull.kill and deaths:
+                wipes_with_deaths += 1
+                last[deaths[-1].char] += 1
+        chars, n = leaders(last, 3, max_names=1)
+        if chars and wipes_with_deaths >= 3:
+            self.add(HIGHLIGHTS, ["🧍 **Last one standing:** ", chars[0],
+                                  f", last to die on {int(n)} of {wipes_with_deaths} wipes",
+                                  self.running("last_standing", chars[0])], "last_standing", chars)
+
+    def counter_award(self, section: str, key: str, title: str, counts: Counter, minimum: int,
+                      noun: str, plural_noun: str | None = None, next_best: bool = False) -> None:
+        chars, n = leaders(counts, minimum, max_names=2)
+        if not chars:
+            return
+        word = noun if n == 1 else (plural_noun or f"{noun}s")
+        tail = f", {int(n)} {word}" + (" each" if len(chars) > 1 else "")
+        if next_best:
+            rest = sorted((v for c, v in counts.items() if c not in chars), reverse=True)
+            if rest:
+                tail += f" (next best: {int(rest[0])})"
+        running = self.running(key, chars[0]) if len(chars) == 1 else ""
+        self.add(section, [title, *joined(chars), tail, running], key, chars)
+
+    # --- lowlights -----------------------------------------------------------------------------
+
+    def lowlights(self) -> None:
+        night = self.night
+        worst = [(pct, boss, p) for p in night.parses if p.role != TANK for pct, boss in p.parses]
+        if worst:
+            pct, boss, p = min(worst, key=lambda w: (w[0], w[2].char.name.casefold()))
+            if pct <= 10:
+                self.add(LOWLIGHTS, ["🚽 **Parse of shame:** ", p.char, f", {pct:.0f} on {boss}",
+                                     self.running("shame", p.char)], "shame", [p.char])
+
+        swings = []
+        for p in night.parses:
+            if p.kills >= 3:
+                lo = min(p.parses)
+                hi = max(p.parses)
+                swings.append((hi[0] - lo[0], p, lo, hi))
+        swings = [s for s in swings if s[0] >= 50]
+        if swings:
+            _, p, lo, hi = max(swings, key=lambda s: s[0])
+            self.add(LOWLIGHTS, ["🎢 **Rollercoaster:** ", p.char, f", {lo[0]:.0f} on {lo[1]} but {hi[0]:.0f} on {hi[1]}"],
+                     "rollercoaster", [p.char])
+
+        healers = sorted(((night.damage_done.get(c, 0), c) for c, r in night.roles.items() if r == HEALER),
+                         key=lambda dc: -dc[0])
+        if len(healers) >= 2 and healers[0][0] >= 1_000_000 and healers[0][0] >= 1.5 * max(healers[1][0], 1):
+            dmg, char = healers[0]
+            ratio = dmg / max(healers[1][0], 1)
+            ratio_text = f"{ratio:.0f}×" if ratio >= 2.95 else f"{ratio:.1f}×"
+            grey = next((p for p in night.grey if p.char == char), None)
+            grey_text = f" with a {grey.average:.1f} healing parse" if grey else ""
+            self.add(LOWLIGHTS, ["⚔️ **Battle healer:** ", char, f", {fmt_big(dmg)} damage ({ratio_text} the next healer)"
+                                 f"{grey_text}", self.running("battle_healer", char)], "battle_healer", [char])
+
+        taken = sorted(((v, c) for c, v in night.damage_taken.items() if night.roles.get(c) != TANK),
+                       key=lambda vc: -vc[0])
+        if taken:
+            v, char = taken[0]
+            self.add(LOWLIGHTS, ["🧽 **Damage sponge:** ", char, f", {fmt_big(v)} damage taken",
+                                 self.running("sponge", char)], "sponge", [char])
+
+        damage_rates = {r.char: r.per_second for r in night.rates if r.role in (DPS, TANK)}
+        tanks = [(damage_rates[c], c) for c, role in night.roles.items() if role == TANK and c in damage_rates]
+        if tanks:
+            best_tank, tank = max(tanks, key=lambda tc: tc[0])
+            beaten = sorted((c for c, role in night.roles.items()
+                             if role == DPS and c in damage_rates and damage_rates[c] < best_tank),
+                            key=lambda c: damage_rates[c])
+            if beaten:
+                self.add(LOWLIGHTS, ["🛡️ **Outdamaged by a tank:** ", *joined(beaten),
+                                     " did less damage than ", tank], "outdamaged", beaten)
+
+    # --- deaths --------------------------------------------------------------------------------
+
+    def deaths(self) -> None:
+        night = self.night
+        if night.floor:
+            parts: list[Part] = ["💀 **Floor inspector:** "]
+            for i, d in enumerate(night.floor):
+                if i:
+                    parts.append(" · ")
+                parts += [d.char, f" {d.deaths}"]
+            if night.floor_tied_more:
+                parts.append(f" · +{night.floor_tied_more} more tied at {night.floor[-1].deaths}")
+            self.add(DEATHS, parts)
+
+        firsts = Counter(ds[0].char for ds in night.counted.values() if ds)
+        chars, n = leaders(firsts, 3)
+        if chars:
+            each = " each" if len(chars) > 1 else ""
+            self.add(DEATHS, ["🐤 **Canary:** ", *joined(chars), f", first to die {times(int(n))}{each}",
+                              self.running("canary", chars[0]) if len(chars) == 1 else ""], "canary", chars)
+
+        kill_ids = {p.id for p in night.pulls if p.kill}
+        on_kills = Counter(d.char for pid in kill_ids for d in night.deaths.get(pid, []))
+        chars, n = leaders(on_kills, 2)
+        if chars:
+            each = " each" if len(chars) > 1 else ""
+            self.add(DEATHS, ["🎁 **Couldn't wait for loot:** ", *joined(chars),
+                              f", {int(n)} deaths{each} on kills"], "loot", chars)
+
+        # Every death counts here, not just those before the wipe call: it's a fun fact, not blame.
+        pairs = Counter((d.char, d.ability) for ds in night.deaths.values() for d in ds if d.ability)
+        ranked = pairs.most_common(2)
+        if ranked and ranked[0][1] >= 3 and (len(ranked) == 1 or ranked[1][1] < ranked[0][1]):
+            (char, name), n = ranked[0]
+            self.add(DEATHS, ["🎯 **Nemesis:** ", char, f" died to {ability_name(name)} {times(n)}"], "nemesis", [char])
+
+        chars, n = leaders(night.brezzed, 3)
+        if chars:
+            each = " each" if len(chars) > 1 else ""
+            self.add(DEATHS, ["🧲 **Brez magnet:** ", *joined(chars), f", rezzed {times(int(n))}{each}",
+                              self.running("brez_magnet", chars[0]) if len(chars) == 1 else ""],
+                     "brez_magnet", chars)
+
+        early = Counter()
+        starts = {p.id: p.start for p in night.pulls}
+        for pid, ds in night.deaths.items():
+            for d in ds:
+                if pid in starts and d.time - starts[pid] < 30_000:
+                    early[d.char] += 1
+        chars, n = leaders(early, 2)
+        if chars:
+            self.add(DEATHS, ["⏱️ **Speedrunner:** ", *joined(chars),
+                              f", dead within 30 seconds of the pull {times(int(n))}"], "speedrunner", chars)
+
+
+def build_lines(night: Night, settings: RecapSettings, history: History | None = None) -> list[Line]:
+    builder = Builder(night, settings, history or NoHistory())
+    builder.headline()
+    builder.the_night()
+    builder.board()
+    builder.highlights()
+    builder.lowlights()
+    builder.deaths()
+    return builder.lines
+
+
+def winners_by_key(lines: list[Line]) -> dict[str, list[Char]]:
+    return {line.key: line.winners for line in lines if line.key and line.winners}
+
+
+def boss_results(night: Night) -> list[tuple[int, int | None, str, BossResult]]:
+    results = []
+    for boss in night.bosses:
+        best = boss.best_wipe
+        results.append((boss.encounter_id, boss.difficulty, boss.name, BossResult(
+            killed=boss.killed,
+            boss_pct=None if boss.killed or not best else best.boss_pct,
+            phase=None if boss.killed or not best else best.phase,
+        )))
+    return results

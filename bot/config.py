@@ -2,6 +2,7 @@
 
 import os
 from dataclasses import dataclass
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 COMPARE_VALUES = {"Rankings", "Parses"}
 TIMEFRAME_VALUES = {"Today", "Historical"}
@@ -39,6 +40,14 @@ def _bool(name: str, default: bool) -> bool:
 def _ids(name: str) -> frozenset[int]:
     value = _str(name, "")
     return frozenset(int(part) for part in value.replace(" ", "").split(",") if part)
+
+
+def _zone(name: str) -> ZoneInfo:
+    value = _str(name, "UTC")
+    try:
+        return ZoneInfo(value)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise SystemExit(f"{name} must be a timezone like America/Chicago, got {value!r}")
 
 
 def _choice(name: str, allowed: set[str]) -> str | None:
@@ -89,6 +98,8 @@ class Config:
     poll_minutes: int
     quiet_minutes: int
     max_wait_hours: int
+    timezone: ZoneInfo  # only for the date in thread titles; message text uses Discord timestamps
+    thread_ping_everyone: bool
     recap: RecapSettings
 
     @classmethod
@@ -103,6 +114,8 @@ class Config:
             poll_minutes=_int("POLL_MINUTES", 5),
             quiet_minutes=_int("QUIET_MINUTES", 20),
             max_wait_hours=_int("MAX_WAIT_HOURS", 8),
+            timezone=_zone("TIMEZONE"),
+            thread_ping_everyone=_bool("THREAD_PING_EVERYONE", True),
             recap=RecapSettings.from_env(),
         )
 

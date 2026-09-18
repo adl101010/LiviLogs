@@ -1,36 +1,76 @@
-"""Turn a probe-out JSON into an anonymised test fixture: real shape, placeholder names.
+"""Turn a raw report JSON (from tools/probe.py) into an anonymised test fixture.
 
-    python -m tools.make_fixture tools/probe-out/<code>/API_default.json tests/fixtures/<name>.json
+    python -m tools.make_fixture tools/probe-out/<code>/full.json tests/fixtures/<name>.json
+
+Every player name and realm is replaced wherever it appears as a JSON string (rankings, tables,
+dispel targets...). Replacements are derived from the real name, so the same player gets the same
+placeholder in every fixture, which history tests ("3 raids running") depend on. Guild names are dropped, and bulky per-ability breakdowns the bot never reads
+are trimmed so fixtures stay small.
 """
 
+import hashlib
 import json
 import sys
 
+_TRIM = {"abilities", "damageAbilities", "targets", "gear", "talents", "pets", "sources", "combatantInfo",
+         "talentTree", "events", "missedCasts"}
+
+
+def _walk(node, fn):
+    if isinstance(node, dict):
+        fn(node)
+        for value in node.values():
+            _walk(value, fn)
+    elif isinstance(node, list):
+        for value in node:
+            _walk(value, fn)
+
 
 def anonymise(report: dict) -> dict:
-    names: dict[str, str] = {}
-    realms: dict[str, str] = {}
+    names: set[str] = set()
+    realms: set[str] = set()
 
-    def name(n):
-        return names.setdefault(n, f"Player{len(names) + 1:02d}")
+    def collect(d):
+        server = d.get("server")
+        if isinstance(server, dict) and server.get("name"):
+            realms.add(server["name"])
+        elif isinstance(server, str) and server:
+            realms.add(server)
+        d.pop("guild", None)
+        d.pop("reportsBlacklistForCharacters", None)
 
-    def realm(r):
-        return realms.setdefault(r, f"Realm {chr(ord('A') + len(realms))}")
-
+    _walk(report, collect)
     for actor in report.get("masterData", {}).get("actors", []):
-        actor["name"] = name(actor["name"])
-        actor["server"] = realm(actor["server"]) if actor.get("server") else actor.get("server")
+        names.add(actor["name"])
+    for role in ((report.get("playerDetails") or {}).get("data", {}).get("playerDetails") or {}).values():
+        names.update(p["name"] for p in role)
     for key in ("dpsRankings", "hpsRankings"):
         for fight in (report.get(key) or {}).get("data", []):
-            fight.pop("reportsBlacklistForCharacters", None)
-            fight.pop("guild", None)
             for role in fight.get("roles", {}).values():
-                for i, c in enumerate(role.get("characters", [])):
-                    c["name"] = name(c["name"])
-                    c["id"] = i + 1
-                    if isinstance(c.get("server"), dict):
-                        c["server"]["name"] = realm(c["server"]["name"])
-                        c["server"]["id"] = 0
+                names.update(c["name"] for c in role.get("characters", []))
+
+    def trim(d):
+        for key in _TRIM & d.keys():
+            if key != "abilities" or "gameID" not in str(d[key])[:200]:
+                d.pop(key)
+        if "total" in d:
+            d.pop("actors", None)  # per-target breakdown inside interrupt/dispel details
+
+    _walk(report, trim)
+    # Keep only the ability names deaths refer to.
+    used = {e.get("killingAbilityGameID") for e in report.get("deaths", [])}
+    md = report.get("masterData", {})
+    md["abilities"] = [a for a in md.get("abilities", []) if a["gameID"] in used]
+
+    def stable(prefix: str, value: str, size: int) -> str:
+        return f'"{prefix}{hashlib.sha256(value.encode()).hexdigest()[:size]}"'
+
+    text = json.dumps(report, ensure_ascii=False)
+    for name in sorted(names, key=lambda n: (-len(n), n)):
+        text = text.replace(json.dumps(name, ensure_ascii=False), stable("P-", name, 6))
+    for realm in sorted(realms, key=lambda r: (-len(r), r)):
+        text = text.replace(json.dumps(realm, ensure_ascii=False), stable("Realm-", realm, 4))
+    report = json.loads(text)
     report["title"] = "Anonymised"
     report["code"] = "Fixture000000000"
     return report

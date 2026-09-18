@@ -1,8 +1,8 @@
-"""Turns raw WCL report JSON into the recap numbers. No network, no Discord: easy to test.
+"""Raw WCL report JSON -> facts about the night. No network, no Discord: easy to test.
 
-WCL marks the rankings and events JSON as "not frozen", so every read of that JSON lives here and
-tolerates missing fields rather than crashing a raid-night post. Shape checked against real retail
-and Classic logs on 2026-09-18.
+WCL marks its rankings, tables and events JSON as "not frozen", so every read of that JSON lives
+here and tolerates missing fields rather than crashing a raid-night post. Shape checked against
+real retail and Classic logs on 2026-09-18 (see tests/fixtures).
 """
 
 import unicodedata
@@ -13,6 +13,7 @@ from .config import RecapSettings
 
 TANK = "tanks"
 HEALER = "healers"
+DPS = "dps"
 
 # Letters that don't decompose into base letter + accent.
 _FOLD = str.maketrans({"ø": "o", "æ": "ae", "œ": "oe", "ð": "d", "þ": "th", "ł": "l", "đ": "d"})
@@ -47,11 +48,72 @@ class Char:
 
 
 @dataclass
+class Pull:
+    id: int
+    encounter_id: int
+    boss: str
+    kill: bool
+    difficulty: int | None
+    start: int  # ms from the start of the report
+    end: int
+    boss_pct: float | None  # boss health left when it ended; 0 on a kill
+    phase: int | None
+    players: frozenset[int]
+
+    @property
+    def seconds(self) -> float:
+        return max(0, self.end - self.start) / 1000
+
+
+@dataclass
+class Boss:
+    encounter_id: int
+    name: str
+    difficulty: int | None
+    pulls: list[Pull]
+
+    @property
+    def killed(self) -> bool:
+        return any(p.kill for p in self.pulls)
+
+    @property
+    def wipes(self) -> list[Pull]:
+        return [p for p in self.pulls if not p.kill]
+
+    @property
+    def best_wipe(self) -> Pull | None:
+        wipes = [p for p in self.wipes if p.boss_pct is not None]
+        return min(wipes, key=lambda p: (p.boss_pct, p.start)) if wipes else None
+
+
+@dataclass
 class ParseLine:
     char: Char
     average: float  # rounded to 1 decimal, the number people see
-    kills: int
     role: str
+    parses: list[tuple[float, str]]  # (percent, boss) per kill
+
+    @property
+    def kills(self) -> int:
+        return len(self.parses)
+
+
+@dataclass
+class Rate:
+    """Raw damage (DPS, tanks) or healing (healers) per second, over the pulls they were in."""
+
+    char: Char
+    role: str
+    per_second: float
+    pulls: int
+
+
+@dataclass
+class Death:
+    pull: int
+    time: int
+    char: Char
+    ability: str | None
 
 
 @dataclass
@@ -62,20 +124,60 @@ class DeathLine:
 
 
 @dataclass
-class Recap:
+class Night:
     title: str
     zone: str | None
     start_ms: int
-    difficulty: int | None
-    kills: int
-    wipes: int
     processing: bool
-    has_parses: bool
+    pulls: list[Pull]
+    bosses: list[Boss]
+    roster: list[Char]  # everyone who was in a boss pull
+    roles: dict[Char, str]
+    parses: list[ParseLine]
+    rates: list[Rate]
+    deaths: dict[int, list[Death]]  # every death, per pull, in order
+    counted: dict[int, list[Death]]  # the first WIPE_CUTOFF deaths of each pull
+    floor: list[DeathLine]
+    floor_tied_more: int
+    interrupts: Counter
+    dispels: Counter
+    damage_done: dict[Char, float]
+    damage_taken: dict[Char, float]
+    brezzed: Counter
+    brez_given: Counter
     high: list[ParseLine] = field(default_factory=list)
     grey: list[ParseLine] = field(default_factory=list)
-    deaths: list[DeathLine] = field(default_factory=list)
-    deaths_tied_more: int = 0  # tied with the last shown line but left out
-    players: list[Char] = field(default_factory=list)
+
+    @property
+    def has_parses(self) -> bool:
+        return bool(self.parses)
+
+    @property
+    def kills(self) -> int:
+        return sum(1 for p in self.pulls if p.kill)
+
+    @property
+    def wipes(self) -> int:
+        return sum(1 for p in self.pulls if not p.kill)
+
+    @property
+    def difficulty(self) -> int | None:
+        kills = [p for p in self.pulls if p.kill]
+        counts = Counter(p.difficulty for p in (kills or self.pulls) if p.difficulty)
+        return counts.most_common(1)[0][0] if counts else None
+
+    @property
+    def boss_seconds(self) -> float:
+        return sum(p.seconds for p in self.pulls)
+
+    @property
+    def span_seconds(self) -> float:
+        if not self.pulls:
+            return 0
+        return (max(p.end for p in self.pulls) - min(p.start for p in self.pulls)) / 1000
+
+
+# --- reading WCL's JSON ------------------------------------------------------------------------
 
 
 def _server_name(server) -> str:
@@ -84,7 +186,41 @@ def _server_name(server) -> str:
     return server or ""
 
 
-def _players(report: dict) -> dict[int, Char]:
+def _data(node):
+    """Tables, rankings and playerDetails wrap their payload in {"data": ...}."""
+    return node.get("data", node) if isinstance(node, dict) else node
+
+
+def _pulls(report: dict) -> list[Pull]:
+    pulls = []
+    for f in report.get("fights") or []:
+        if (f.get("encounterID") or 0) <= 0 or f.get("id") is None:
+            continue
+        kill = bool(f.get("kill"))
+        boss_pct = f.get("bossPercentage")
+        pulls.append(Pull(
+            id=f["id"],
+            encounter_id=f["encounterID"],
+            boss=f.get("name") or "Boss",
+            kill=kill,
+            difficulty=f.get("difficulty"),
+            start=int(f.get("startTime") or 0),
+            end=int(f.get("endTime") or 0),
+            boss_pct=0.0 if kill else (float(boss_pct) if isinstance(boss_pct, (int, float)) else None),
+            phase=f.get("lastPhase") or None,
+            players=frozenset(f.get("friendlyPlayers") or []),
+        ))
+    return sorted(pulls, key=lambda p: p.start)
+
+
+def _bosses(pulls: list[Pull]) -> list[Boss]:
+    grouped: dict[tuple, list[Pull]] = {}
+    for p in pulls:
+        grouped.setdefault((p.encounter_id, p.difficulty), []).append(p)
+    return [Boss(eid, ps[0].boss, diff, ps) for (eid, diff), ps in grouped.items()]
+
+
+def _players(report: dict, pulls: list[Pull]) -> dict[int, Char]:
     """Players who were in at least one boss pull.
 
     WCL's actor list also has everyone who merely walked past in the log (105 "players" for a
@@ -92,9 +228,8 @@ def _players(report: dict) -> dict[int, Char]:
     """
     actors = ((report.get("masterData") or {}).get("actors")) or []
     raiders: set[int] = set()
-    for fight in report.get("fights") or []:
-        if (fight.get("encounterID") or 0) > 0:
-            raiders.update(fight.get("friendlyPlayers") or [])
+    for p in pulls:
+        raiders |= p.players
     return {
         a["id"]: Char(a.get("name") or "?", _server_name(a.get("server")))
         for a in actors
@@ -105,12 +240,11 @@ def _players(report: dict) -> dict[int, Char]:
 
 
 def _ranking_fights(rankings) -> list[dict]:
-    if isinstance(rankings, dict):
-        rankings = rankings.get("data", rankings)
+    rankings = _data(rankings)
     return rankings if isinstance(rankings, list) else []
 
 
-def _parses(report: dict, players: dict[int, Char]) -> dict[Char, list[tuple[float, str]]]:
+def _parses(report: dict, players: dict[int, Char]) -> dict[Char, list[tuple[float, str, str]]]:
     realm_by_name: dict[str, set[str]] = defaultdict(set)
     for char in players.values():
         realm_by_name[norm_name(char.name)].add(char.realm)
@@ -120,11 +254,12 @@ def _parses(report: dict, players: dict[int, Char]) -> dict[Char, list[tuple[flo
         (report.get("dpsRankings"), lambda role: role != HEALER),
         (report.get("hpsRankings"), lambda role: role == HEALER),
     ]
-    parses: dict[Char, list[tuple[float, str]]] = defaultdict(list)
+    parses: dict[Char, list[tuple[float, str, str]]] = defaultdict(list)
     for rankings, wanted in sources:
         for fight in _ranking_fights(rankings):
             if fight.get("kill") in (0, False):
                 continue
+            boss = (fight.get("encounter") or {}).get("name") or "a boss"
             for role_key, role in (fight.get("roles") or {}).items():
                 role_key = role_key.lower()
                 if not wanted(role_key) or not isinstance(role, dict):
@@ -138,52 +273,117 @@ def _parses(report: dict, players: dict[int, Char]) -> dict[Char, list[tuple[flo
                     if not realm:
                         known = realm_by_name.get(norm_name(name), set())
                         realm = next(iter(known)) if len(known) == 1 else ""
-                    parses[Char(name, realm)].append((float(pct), role_key))
+                    parses[Char(name, realm)].append((float(pct), role_key, boss))
     return parses
 
 
-def _parse_lines(parses: dict[Char, list[tuple[float, str]]]) -> list[ParseLine]:
+def _parse_lines(parses: dict[Char, list[tuple[float, str, str]]]) -> list[ParseLine]:
     lines = []
     for char, entries in parses.items():
-        roles = Counter(role for _, role in entries)
+        roles = Counter(role for _, role, _ in entries)
         # A player counts as a tank for the night only if they tanked most of their kills.
         others = Counter({r: n for r, n in roles.items() if r != TANK})
         role = TANK if roles[TANK] * 2 > len(entries) or not others else others.most_common(1)[0][0]
-        average = round(sum(pct for pct, _ in entries) / len(entries), 1)
-        lines.append(ParseLine(char, average, len(entries), role))
+        average = round(sum(pct for pct, _, _ in entries) / len(entries), 1)
+        lines.append(ParseLine(char, average, role, [(pct, boss) for pct, _, boss in entries]))
     return lines
 
 
-def _death_lines(
-    report: dict, players: dict[int, Char], fight_ids: set[int], settings: RecapSettings
-) -> tuple[list[DeathLine], int]:
+def _roles(report: dict, players: dict[int, Char], lines: list[ParseLine]) -> dict[Char, str]:
+    """The role each player mostly played tonight. WCL's player details cover wipes too, and a
+    player who swapped roles is listed under each, with how many pulls they spent in each spec."""
+    by_id: dict[int, Counter] = defaultdict(Counter)
+    details = (_data(report.get("playerDetails")) or {}).get("playerDetails") or {}
+    for role, entries in details.items():
+        for p in entries or []:
+            count = sum(s.get("count", 1) for s in p.get("specs") or []) or 1
+            by_id[p.get("id")][role.lower()] += count
+    roles = {players[pid]: counts.most_common(1)[0][0] for pid, counts in by_id.items() if pid in players}
+    for line in lines:
+        roles.setdefault(line.char, line.role)
+    for char in players.values():
+        roles.setdefault(char, DPS)
+    return roles
+
+
+def _table_entries(report: dict, key: str) -> list[dict]:
+    return (_data(report.get(key)) or {}).get("entries") or []
+
+
+def _by_player(report: dict, key: str, players: dict[int, Char]) -> dict[Char, float]:
+    totals: dict[Char, float] = {}
+    for e in _table_entries(report, key):
+        char = players.get(e.get("id"))
+        if char and isinstance(e.get("total"), (int, float)):
+            totals[char] = totals.get(char, 0) + e["total"]
+    return totals
+
+
+def _cast_tally(report: dict, key: str, players: dict[int, Char]) -> Counter:
+    """Interrupts and dispels: nested per interrupted/dispelled spell, then per player."""
+    tally: Counter = Counter()
+    for outer in _table_entries(report, key):
+        for spell in outer.get("entries") or []:
+            for d in spell.get("details") or []:
+                char = players.get(d.get("id"))
+                if char:
+                    tally[char] += d.get("total") or 0
+    return tally
+
+
+def _rates(pulls: list[Pull], players: dict[int, Char], roles: dict[Char, str],
+           damage: dict[Char, float], healing: dict[Char, float]) -> list[Rate]:
+    # Divided by each player's own time in pulls: someone who sat out half the night isn't
+    # made to look half as good.
+    seconds: Counter = Counter()
+    count: Counter = Counter()
+    for p in pulls:
+        for pid in p.players:
+            if pid in players:
+                seconds[players[pid]] += p.seconds
+                count[players[pid]] += 1
+    rates = []
+    for char, role in roles.items():
+        total = (healing if role == HEALER else damage).get(char)
+        if total and seconds[char]:
+            rates.append(Rate(char, role, total / seconds[char], count[char]))
+    return sorted(rates, key=lambda r: -r.per_second)
+
+
+def _deaths(report: dict, players: dict[int, Char], pulls: list[Pull],
+            settings: RecapSettings) -> dict[int, list[Death]]:
+    abilities = (report.get("masterData") or {}).get("abilities") or []
+    names = {a.get("gameID"): a.get("name") for a in abilities}
+    pull_ids = {p.id for p in pulls}
     events = report.get("deaths")
-    per_fight: dict[int, list[tuple[float, Char]]] = defaultdict(list)
+    per_pull: dict[int, list[Death]] = defaultdict(list)
     for e in events if isinstance(events, list) else []:
         fight = e.get("fight")
-        if fight_ids and fight not in fight_ids and not settings.deaths_include_trash:
+        if pull_ids and fight not in pull_ids and not settings.deaths_include_trash:
             continue
         char = players.get(e.get("targetID"))
         if char is None:
             continue  # pets, NPCs
-        per_fight[fight].append((e.get("timestamp") or 0, char))
+        ability = names.get(e.get("killingAbilityGameID"))
+        per_pull[fight].append(Death(fight, e.get("timestamp") or 0, char, ability))
+    for deaths in per_pull.values():
+        deaths.sort(key=lambda d: d.time)
+    return dict(per_pull)
 
-    deaths: Counter[Char] = Counter()
-    firsts: Counter[Char] = Counter()
-    for fight_deaths in per_fight.values():
-        fight_deaths.sort(key=lambda d: d[0])
-        # Deaths after the wipe is called don't count against anyone.
-        counted = fight_deaths[: settings.wipe_cutoff] if settings.wipe_cutoff > 0 else fight_deaths
-        for _, char in counted:
-            deaths[char] += 1
-        if counted:
-            firsts[counted[0][1]] += 1
 
+def _floor(counted: dict[int, list[Death]], top_n: int) -> tuple[list[DeathLine], int]:
+    deaths: Counter = Counter()
+    firsts: Counter = Counter()
+    for pull_deaths in counted.values():
+        for d in pull_deaths:
+            deaths[d.char] += 1
+        if pull_deaths:
+            firsts[pull_deaths[0].char] += 1
     ranked = [
         DeathLine(c, deaths[c], firsts[c])
         for c in sorted(deaths, key=lambda c: (-deaths[c], -firsts[c], c.name.casefold()))
     ]
-    return _top_with_ties(ranked, settings.deaths_top_n)
+    return _top_with_ties(ranked, top_n)
 
 
 def _top_with_ties(ranked: list[DeathLine], n: int) -> tuple[list[DeathLine], int]:
@@ -196,52 +396,72 @@ def _top_with_ties(ranked: list[DeathLine], n: int) -> tuple[list[DeathLine], in
         if shown and len(shown) + len(group) > n + 2:
             break  # the tie would crowd the list; the players above it are the story
         if not shown and len(group) > n + 2:
-            return group[: n], len(group) - n  # everyone tied at the top: show some, count the rest
+            return group[:n], len(group) - n  # everyone tied at the top: show some, count the rest
         shown += group
         i += len(group)
     return shown, 0
 
 
-def build_recap(report: dict, settings: RecapSettings) -> Recap:
-    players = _players(report)
-    fights = [f for f in (report.get("fights") or []) if (f.get("encounterID") or 0) > 0]
-    kills = [f for f in fights if f.get("kill")]
-    difficulties = Counter(f.get("difficulty") for f in kills or fights if f.get("difficulty"))
+def _resurrects(report: dict, players: dict[int, Char], pull_ids: set[int]) -> tuple[Counter, Counter]:
+    brezzed: Counter = Counter()
+    given: Counter = Counter()
+    events = report.get("resurrects")
+    for e in events if isinstance(events, list) else []:
+        if pull_ids and e.get("fight") not in pull_ids:
+            continue
+        if e.get("targetID") in players:
+            brezzed[players[e["targetID"]]] += 1
+        if e.get("sourceID") in players:
+            given[players[e["sourceID"]]] += 1
+    return brezzed, given
 
+
+def analyze(report: dict, settings: RecapSettings) -> Night:
+    pulls = _pulls(report)
+    players = _players(report, pulls)
     lines = _parse_lines(_parses(report, players))
-    deaths, tied_more = _death_lines(report, players, {f["id"] for f in fights if "id" in f}, settings)
-    high = sorted(
-        (p for p in lines if p.average >= settings.parse_high),
-        key=lambda p: (-p.average, p.char.name.casefold()),
-    )
-    grey = sorted(
-        (
-            p for p in lines
-            if p.average < settings.parse_grey and (settings.grey_include_tanks or p.role != TANK)
-        ),
-        key=lambda p: (p.average, p.char.name.casefold()),
-    )
+    roles = _roles(report, players, lines)
+    damage = _by_player(report, "damageDone", players)
+    healing = _by_player(report, "healing", players)
+    deaths = _deaths(report, players, pulls, settings)
+    cutoff = settings.wipe_cutoff
+    # Deaths after the wipe is called don't count against anyone.
+    counted = {pid: (ds[:cutoff] if cutoff > 0 else ds) for pid, ds in deaths.items()}
+    floor, tied_more = _floor(counted, settings.deaths_top_n)
+    brezzed, given = _resurrects(report, players, {p.id for p in pulls})
 
-    segments = report.get("segments") or 0
-    exported = report.get("exportedSegments") or 0
-    zone = report.get("zone") or {}
+    roster = {c.key: c for c in players.values()}
+    for line in lines:
+        roster.setdefault(line.char.key, line.char)
 
-    seen = {c.key: c for c in players.values()}
-    for p in lines:
-        seen.setdefault(p.char.key, p.char)
-
-    return Recap(
+    return Night(
         title=report.get("title") or "Raid",
-        zone=zone.get("name"),
+        zone=(report.get("zone") or {}).get("name"),
         start_ms=int(report.get("startTime") or 0),
-        difficulty=difficulties.most_common(1)[0][0] if difficulties else None,
-        kills=len(kills),
-        wipes=len(fights) - len(kills),
-        processing=exported < segments,
-        has_parses=bool(lines),
-        high=high,
-        grey=grey,
+        processing=(report.get("exportedSegments") or 0) < (report.get("segments") or 0),
+        pulls=pulls,
+        bosses=_bosses(pulls),
+        roster=sorted(roster.values(), key=lambda c: c.name.casefold()),
+        roles=roles,
+        parses=lines,
+        rates=_rates(pulls, players, roles, damage, healing),
         deaths=deaths,
-        deaths_tied_more=tied_more,
-        players=sorted(seen.values(), key=lambda c: c.name.casefold()),
+        counted=counted,
+        floor=floor,
+        floor_tied_more=tied_more,
+        interrupts=_cast_tally(report, "interrupts", players),
+        dispels=_cast_tally(report, "dispels", players),
+        damage_done=damage,
+        damage_taken=_by_player(report, "damageTaken", players),
+        brezzed=brezzed,
+        brez_given=given,
+        high=sorted(
+            (p for p in lines if p.average >= settings.parse_high),
+            key=lambda p: (-p.average, p.char.name.casefold()),
+        ),
+        grey=sorted(
+            (p for p in lines
+             if p.average < settings.parse_grey and (settings.grey_include_tanks or p.role != TANK)),
+            key=lambda p: (p.average, p.char.name.casefold()),
+        ),
     )

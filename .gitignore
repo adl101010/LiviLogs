@@ -1,0 +1,8 @@
+.venv/
+__pycache__/
+.pytest_cache/
+.env
+data/
+*.sqlite3
+# Raw JSON from real guild logs: character names, keep out of the repo
+tools/probe-out/

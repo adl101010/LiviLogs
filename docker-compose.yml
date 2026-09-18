@@ -1,0 +1,28 @@
+# Dockge stack. Put the values in the stack's .env (see .env.example).
+# No ports: the bot only makes outbound connections to Discord and Warcraft Logs.
+services:
+  wcl-bot:
+    image: ghcr.io/adl101010/wcl-bot:stable
+    container_name: wcl-bot
+    restart: unless-stopped
+    environment:
+      DISCORD_TOKEN: ${DISCORD_TOKEN}
+      WCL_CLIENT_ID: ${WCL_CLIENT_ID}
+      WCL_CLIENT_SECRET: ${WCL_CLIENT_SECRET}
+      WATCH_CHANNEL_IDS: ${WATCH_CHANNEL_IDS:-}
+      DISCORD_GUILD_ID: ${DISCORD_GUILD_ID:-}
+      OFFICER_ROLE_ID: ${OFFICER_ROLE_ID:-}
+      DEFAULT_REALM: ${DEFAULT_REALM:-}
+      PARSE_HIGH: ${PARSE_HIGH:-90}
+      PARSE_GREY: ${PARSE_GREY:-25}
+      GREY_INCLUDE_TANKS: ${GREY_INCLUDE_TANKS:-false}
+      WIPE_CUTOFF: ${WIPE_CUTOFF:-5}
+      DEATHS_TOP_N: ${DEATHS_TOP_N:-3}
+      DEATHS_INCLUDE_TRASH: ${DEATHS_INCLUDE_TRASH:-false}
+      WCL_COMPARE: ${WCL_COMPARE:-}
+      WCL_TIMEFRAME: ${WCL_TIMEFRAME:-}
+    volumes:
+      - wcl-bot-data:/data
+
+volumes:
+  wcl-bot-data:

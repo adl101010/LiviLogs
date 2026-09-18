@@ -56,7 +56,29 @@ def anonymise(report: dict) -> dict:
         if "total" in d:
             d.pop("actors", None)  # per-target breakdown inside interrupt/dispel details
 
+    # Consumables: keep only what the bot reads. The generic trim above would drop the casts
+    # table's per-player "sources", and each combatantInfo snapshot carries full gear and talents.
+    snapshots = [
+        {"type": e.get("type"), "fight": e.get("fight"), "sourceID": e.get("sourceID"),
+         "auras": [{"name": a.get("name"), "ability": a.get("ability")} for a in e.get("auras") or []]}
+        for e in report.pop("combatantInfo", None) or []
+    ]
+    casts = report.pop("casts", None)
+    if casts:
+        data = casts.get("data", {})
+        keep = ("Potion", "Healthstone", "Brew", "Food")  # consumables, plus a few look-alikes that must not count
+        data["entries"] = [
+            {"name": e.get("name"), "guid": e.get("guid"), "total": e.get("total"),
+             "sources": [{"name": x.get("name"), "total": x.get("total")} for x in e.get("sources") or []]}
+            for e in data.get("entries", []) if any(k in (e.get("name") or "") for k in keep)
+        ]
+        casts = {"data": {k: data[k] for k in ("entries", "gameVersion", "totalTime") if k in data}}
+
     _walk(report, trim)
+    if snapshots:
+        report["combatantInfo"] = snapshots
+    if casts:
+        report["casts"] = casts
     # Keep only the ability names deaths refer to.
     used = {e.get("killingAbilityGameID") for e in report.get("deaths", [])}
     md = report.get("masterData", {})

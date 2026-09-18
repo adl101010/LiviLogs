@@ -15,6 +15,15 @@ TANK = "tanks"
 HEALER = "healers"
 DPS = "dps"
 
+# Consumables whose names follow a pattern that has held across expansions. The ones that don't
+# (combat potions, the tryhard augment rune) are listed in settings instead.
+HEALTH_ITEM_PATTERNS = ("Healthstone", "Health Potion", "Healing Potion")
+MANA_POTION_PATTERN = "Mana Potion"
+FLASK_PREFIXES = ("Flask of", "Phial of")
+FOOD_PATTERN = "Well Fed"
+VANTUS_PREFIX = "Vantus Rune"
+RETAIL = 1  # WCL's gameVersion for retail; Classic flavours have their own numbers
+
 # Letters that don't decompose into base letter + accent.
 _FOLD = str.maketrans({"ø": "o", "æ": "ae", "œ": "oe", "ð": "d", "þ": "th", "ł": "l", "đ": "d"})
 
@@ -147,6 +156,15 @@ class Night:
     brez_given: Counter
     high: list[ParseLine] = field(default_factory=list)
     grey: list[ParseLine] = field(default_factory=list)
+    # Consumables (retail only: Classic's potions and elixirs need their own lists).
+    retail: bool = False
+    pulls_in: dict[Char, set[int]] = field(default_factory=dict)
+    auras_at_pull: dict[int, dict[Char, list[str]]] = field(default_factory=dict)  # pull -> player -> buffs
+    potion_pulls: dict[Char, set[int]] = field(default_factory=dict)  # pulls with a combat potion
+    potions: Counter = field(default_factory=Counter)  # combat potions
+    casts_known: bool = False  # False: no casts data, so "never used a healthstone" can't be judged
+    health_items: Counter = field(default_factory=Counter)  # healthstones and health potions
+    mana_potions: Counter = field(default_factory=Counter)
 
     @property
     def has_parses(self) -> bool:
@@ -402,6 +420,61 @@ def _top_with_ties(ranked: list[DeathLine], n: int) -> tuple[list[DeathLine], in
     return shown, 0
 
 
+def _game_version(report: dict) -> int | None:
+    for key in ("damageDone", "healing", "damageTaken", "casts"):
+        version = (_data(report.get(key)) or {}).get("gameVersion")
+        if version is not None:
+            return version
+    return None
+
+
+def _auras_at_pull(report: dict, players: dict[int, Char], pull_ids: set[int]) -> dict[int, dict[Char, list[str]]]:
+    """WCL snapshots every player's buffs as each pull starts: flask, food, rune, vantus."""
+    out: dict[int, dict[Char, list[str]]] = defaultdict(dict)
+    events = report.get("combatantInfo")
+    for e in events if isinstance(events, list) else []:
+        char = players.get(e.get("sourceID"))
+        if char and e.get("fight") in pull_ids:
+            out[e["fight"]][char] = [a.get("name") or "" for a in e.get("auras") or []]
+    return dict(out)
+
+
+def _combat_potions(report: dict, players: dict[int, Char], pull_ids: set[int]) -> tuple[dict[Char, set[int]], Counter]:
+    pulls: dict[Char, set[int]] = defaultdict(set)
+    count: Counter = Counter()
+    events = report.get("potions")
+    for e in events if isinstance(events, list) else []:
+        char = players.get(e.get("targetID"))
+        if char and e.get("fight") in pull_ids:
+            pulls[char].add(e["fight"])
+            count[char] += 1
+    return dict(pulls), count
+
+
+def is_health_item(name: str, extra: tuple[str, ...] = ()) -> bool:
+    return any(pattern in name for pattern in HEALTH_ITEM_PATTERNS) or name in extra
+
+
+def _consumable_casts(report: dict, players: dict[int, Char], extra: tuple[str, ...]) -> tuple[Counter, Counter]:
+    """Healthstones, health potions and mana potions are casts. The casts table names players
+    rather than giving ids, so names are matched against the raid (skipping any ambiguous name)."""
+    by_name: dict[str, list[Char]] = defaultdict(list)
+    for char in players.values():
+        by_name[norm_name(char.name)].append(char)
+    health: Counter = Counter()
+    mana: Counter = Counter()
+    for e in _table_entries(report, "casts"):
+        name = e.get("name") or ""
+        tally = health if is_health_item(name, extra) else mana if MANA_POTION_PATTERN in name else None
+        if tally is None:
+            continue
+        for source in e.get("sources") or []:
+            chars = by_name.get(norm_name(source.get("name") or ""), [])
+            if len(chars) == 1:
+                tally[chars[0]] += source.get("total") or 0
+    return health, mana
+
+
 def _resurrects(report: dict, players: dict[int, Char], pull_ids: set[int]) -> tuple[Counter, Counter]:
     brezzed: Counter = Counter()
     given: Counter = Counter()
@@ -434,6 +507,15 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
     for line in lines:
         roster.setdefault(line.char.key, line.char)
 
+    pull_ids = {p.id for p in pulls}
+    pulls_in: dict[Char, set[int]] = defaultdict(set)
+    for p in pulls:
+        for pid in p.players:
+            if pid in players:
+                pulls_in[players[pid]].add(p.id)
+    potion_pulls, potions = _combat_potions(report, players, pull_ids)
+    health, mana = _consumable_casts(report, players, settings.extra_health_items)
+
     return Night(
         title=report.get("title") or "Raid",
         zone=(report.get("zone") or {}).get("name"),
@@ -464,4 +546,12 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
              if p.average < settings.parse_grey and (settings.grey_include_tanks or p.role != TANK)),
             key=lambda p: (p.average, p.char.name.casefold()),
         ),
+        retail=_game_version(report) == RETAIL,
+        pulls_in=dict(pulls_in),
+        auras_at_pull=_auras_at_pull(report, players, pull_ids),
+        potion_pulls=potion_pulls,
+        potions=potions,
+        casts_known="casts" in report,
+        health_items=health,
+        mana_potions=mana,
     )

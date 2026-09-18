@@ -127,6 +127,7 @@ def test_finished_log_posts_headline_and_thread():
     assert thread.name == "Raid report · Sep 17 · Liberation of Undermine"
     assert [m.content.splitlines()[0] for m in thread.sent] == [
         "🗺️ **The night**", "📊 **Parses**", "🌟 **Highlights**", "🤡 **Lowlights**", "💀 **Deaths**",
+        "🧪 **Consumables**",
     ]
     # In the thread each person is pinged once, on their first mention.
     pings = [pinged(m.allowed) for m in thread.sent]
@@ -150,7 +151,7 @@ def test_posting_remembers_the_night_for_next_time():
 def test_without_thread_permission_the_report_goes_in_the_channel():
     bot, channel = make_bot(FakeWCL(), FakeChannel(can_thread=False))
     post_link(bot, channel)
-    assert len(channel.sent) == 6  # headline + 5 sections
+    assert len(channel.sent) == 7  # headline + 6 sections
     assert channel.sent[1].content.startswith("🗺️ **The night**")
 
 

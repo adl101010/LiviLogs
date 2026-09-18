@@ -10,7 +10,9 @@ from datetime import datetime, timezone
 from typing import Callable
 from zoneinfo import ZoneInfo
 
-from .awards import BOARD, DEATHS, HEADLINE, HIGHLIGHTS, LOWLIGHTS, NIGHT, Line, fmt_duration, plural
+from .awards import (
+    BOARD, CONSUMABLES, DEATHS, HEADLINE, HIGHLIGHTS, LOWLIGHTS, NIGHT, Line, fmt_duration, plural,
+)
 from .recap import Char, Night
 
 DISCORD_LIMIT = 2000
@@ -25,6 +27,7 @@ SECTIONS = [
     (HIGHLIGHTS, "🌟 **Highlights**"),
     (LOWLIGHTS, "🤡 **Lowlights**"),
     (DEATHS, "💀 **Deaths**"),
+    (CONSUMABLES, "🧪 **Consumables**"),
 ]
 
 _MENTION = re.compile(r"<@(\d+)>")

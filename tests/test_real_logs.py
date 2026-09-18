@@ -35,8 +35,8 @@ def test_guild_kill_night():
     # WCL lists 105 players (everyone seen in the log); only the 16 in boss pulls are the raid.
     assert len(data["masterData"]["actors"]) == 105 and len(night.roster) == 16
     assert (night.difficulty, night.kills, night.wipes) == (4, 7, 11)
-    assert [p.average for p in night.high] == [96.0]
-    assert [(p.average, p.role) for p in night.grey] == [(20.9, "healers")]
+    assert [p.average for p in night.high] == [95.9]  # refetched 2026-09-18 10:00; parses drift
+    assert [(p.average, p.role) for p in night.grey] == [(20.3, "healers")]
     assert [(d.deaths, d.first_deaths) for d in night.floor] == [(11, 5), (9, 1), (7, 1), (7, 0)]
 
     r, text, _ = text_of(night)
@@ -45,9 +45,19 @@ def test_guild_kill_night():
     assert "wiped with the boss at **1.5%** in P3" in text  # The Coiled Altar
     assert "🦶 **Kick captain:**" in text and "17 interrupts (next best: 8)" in text
     assert "🧼 **Dispel machine:**" in text and "177 dispels" in text
-    assert "72M damage (3× the next healer) with a 20.9 healing parse" in text
+    assert "72M damage (3× the next healer) with a 20.3 healing parse" in text
     assert "🎁 **Couldn't wait for loot:**" in text and "3 deaths each on kills" in text
     assert "Nemesis" not in text  # a three-way tie at 3: nobody stands out
+
+    consumables = next(m.text for m in r.thread if m.text.startswith("🧪"))
+    assert "every pull · " in consumables and " 13 of 18 · " in consumables and " 11 of 18" in consumables
+    assert "23 combat potions each" in consumables
+    assert "22 mana potions" in consumables
+    assert "24 healthstones and health potions" in consumables
+    assert "on 14 of 17 pulls · " in consumables and " 10 of 18" in consumables  # hoarders
+    assert "died 7 times · " in consumables and " twice" in consumables  # healthstone in the bag
+    assert "⚗️ **No flask:**" in consumables and "on 4 of 17 pulls" in consumables
+    assert ", all 4 pulls" in consumables  # six people skipped vantus on the 4 pulls the raid used it
 
 
 def test_guild_prog_night():
@@ -64,6 +74,14 @@ def test_guild_prog_night():
     assert "38 interrupts (next best: 21)" in text
     assert "9 battle rezzes" in text
     assert "died to Necrotic Vapors 6 times" in text
+
+    consumables = next(m.text for m in r.thread if m.text.startswith("🧪"))
+    assert "28 combat potions in 18 pulls" in consumables
+    assert "38 healthstones and health potions" in consumables
+    assert "on 14 of 15 pulls · " in consumables and consumables.count("no potion of any kind all night") == 2
+    assert "died 7 times · " in consumables and " 6 times · " in consumables
+    assert "on 5 of 15 pulls" in consumables  # forgot to eat
+    assert " all 15 pulls · " in consumables and " all 6 pulls" in consumables  # no vantus
 
 
 def test_consecutive_nights_build_history():
@@ -83,10 +101,11 @@ def test_classic_tbc():
     night = analyze(load("classic_tbc"), SETTINGS)
     assert (night.zone, night.difficulty, night.kills, night.wipes) == ("ZA / SWP", 3, 12, 0)
     assert len(night.roster) == 25
-    assert [p.average for p in night.grey] == [4.9, 12.8, 20.0, 23.2, 24.6]
+    assert [p.average for p in night.grey] == [4.8, 12.6, 19.4, 22.8, 24.2]
     r, text, _ = text_of(night)
     assert "12 bosses down" in r.headline
     assert "🧼 **Dispel machine:**" in text
+    assert not night.retail and "Consumables" not in text  # Classic potions need their own list
 
 
 def test_old_shape_without_new_fields_still_works():

@@ -12,7 +12,9 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from .config import RecapSettings
-from .recap import DPS, HEALER, TANK, Boss, Char, Night, ParseLine
+from .recap import (
+    DPS, FLASK_PREFIXES, FOOD_PATTERN, HEALER, TANK, VANTUS_PREFIX, Boss, Char, Night, ParseLine,
+)
 
 HEADLINE = "headline"
 NIGHT = "night"
@@ -20,6 +22,7 @@ BOARD = "board"
 HIGHLIGHTS = "highlights"
 LOWLIGHTS = "lowlights"
 DEATHS = "deaths"
+CONSUMABLES = "consumables"
 
 Part = str | Char
 
@@ -477,6 +480,152 @@ class Builder:
             self.add(DEATHS, ["⏱️ **Speedrunner:** ", *joined(chars),
                               f", dead within 30 seconds of the pull {times(int(n))}"], "speedrunner", chars)
 
+    # --- consumables ---------------------------------------------------------------------------
+
+    def consumables(self) -> None:
+        night = self.night
+        if not night.retail or not night.auras_at_pull:
+            return  # Classic's potions and elixirs need their own lists; not supported yet
+        snapshots = Counter(char for players in night.auras_at_pull.values() for char in players)
+
+        def missing(check) -> Counter:
+            """Pulls on which each player didn't have a buff matching `check` as the pull started."""
+            out: Counter = Counter()
+            for players in night.auras_at_pull.values():
+                for char, auras in players.items():
+                    if not any(check(a) for a in auras):
+                        out[char] += 1
+            return out
+
+        def of(n: int, total: int, first: bool) -> str:
+            return f"on {n} of {total} pulls" if first else f"{n} of {total}"
+
+        # Tryhards: the consumable augment rune on at least half their pulls.
+        runes = set(self.settings.tryhard_runes)
+        if runes:
+            used = Counter({c: snapshots[c] - n for c, n in missing(lambda a: a in runes).items()})
+            used.update({c: n for c, n in snapshots.items() if c not in used})
+            tryhards = sorted((c for c in used if used[c] and used[c] * 2 >= snapshots[c]),
+                              key=lambda c: (-used[c] / snapshots[c], -used[c], c.name.casefold()))
+            if tryhards:
+                parts: list[Part] = [f"🔮 **Tryhards** ({' / '.join(sorted(runes))} rune): "]
+                for i, c in enumerate(tryhards):
+                    if i:
+                        parts.append(" · ")
+                    parts += [c, " every pull" if used[c] == snapshots[c] else f" {used[c]} of {snapshots[c]}"]
+                self.add(CONSUMABLES, parts, "tryhard", tryhards)
+
+        chars, n = leaders(night.potions, 5, max_names=2)
+        if chars:
+            pulls = len(night.pulls_in.get(chars[0], ()))
+            tail = f", {int(n)} combat potions each" if len(chars) > 1 else f", {int(n)} combat potions in {pulls} pulls"
+            self.add(CONSUMABLES, ["🍺 **Potion seller:** ", *joined(chars), tail,
+                                   self.running("potion_seller", chars[0]) if len(chars) == 1 else ""],
+                     "potion_seller", chars)
+
+        healer_mana = Counter({c: v for c, v in night.mana_potions.items() if night.roles.get(c) == HEALER})
+        chars, n = leaders(healer_mana, 3, max_names=2)
+        if chars:
+            each = " each" if len(chars) > 1 else ""
+            self.add(CONSUMABLES, ["🫗 **Mana chugger:** ", *joined(chars), f", {int(n)} mana potions{each}",
+                                   self.running("mana_chugger", chars[0]) if len(chars) == 1 else ""],
+                     "mana_chugger", chars)
+
+        chars, n = leaders(night.health_items, 10, max_names=2)
+        if chars:
+            each = " each" if len(chars) > 1 else ""
+            self.add(CONSUMABLES, ["🍪 **Cookie monster:** ", *joined(chars), f", {int(n)} healthstones and health potions{each}",
+                                   self.running("cookie", chars[0]) if len(chars) == 1 else ""],
+                     "cookie", chars)
+
+        # Potion hoarders. DPS and tanks: no combat potion on more than half their pulls. Healers
+        # drink mana potions when they need them, so they only count if they drank nothing at all.
+        hoarders = []
+        for char, pulls in night.pulls_in.items():
+            total = len(pulls)
+            potted = len(night.potion_pulls.get(char, ()))
+            if total < 3:
+                continue
+            if night.roles.get(char) == HEALER:
+                if not potted and not night.mana_potions.get(char):
+                    hoarders.append((1.0, char, "healer", total))
+            elif (total - potted) * 2 > total:
+                hoarders.append(((total - potted) / total, char, total - potted, total))
+        if hoarders:
+            parts = ["🧪 **Potion hoarders** (no combat potion): "]
+            # DPS and tanks first, worst first; healers (who drank nothing at all) after them.
+            ordered = sorted(hoarders, key=lambda h: (h[2] == "healer", -h[0], h[1].name.casefold()))
+            numbered = 0
+            for i, (_, char, skipped, total) in enumerate(ordered):
+                if i:
+                    parts.append(" · ")
+                if skipped == "healer":
+                    parts += [char, ", no potion of any kind all night"]
+                elif skipped == total:
+                    parts += [char, ", not a single one all night"]
+                else:
+                    parts += [char, " " + of(skipped, total, first=numbered == 0)]
+                    numbered += 1
+            self.add(CONSUMABLES, parts, "hoarder", [h[1] for h in hoarders])
+
+        # Died with a healthstone in the bag: not one healthstone or health potion all night, and
+        # died at least twice (deaths before the wipe call, the same count as the floor inspector).
+        if night.casts_known:
+            counted = Counter(d.char for ds in night.counted.values() for d in ds)
+            bag = sorted((c for c, n in counted.items() if n >= 2 and not night.health_items.get(c)),
+                         key=lambda c: (-counted[c], c.name.casefold()))
+            if bag:
+                parts = ["🪦 **Died with a healthstone in the bag** (not one healthstone or health potion all night): "]
+                for i, c in enumerate(bag):
+                    if i:
+                        parts.append(" · ")
+                    parts += [c, (" died " if i == 0 else " ") + times(counted[c])]
+                self.add(CONSUMABLES, parts, "healthstone_bag", bag)
+
+        for key, title, check in (
+            ("no_flask", "⚗️ **No flask:** ", lambda a: a.startswith(FLASK_PREFIXES)),
+            ("no_food", "🍗 **Forgot to eat:** ", lambda a: FOOD_PATTERN in a),
+        ):
+            gaps = missing(check)
+            offenders = sorted((c for c, n in gaps.items() if n >= 2), key=lambda c: (-gaps[c], c.name.casefold()))
+            if offenders:
+                parts = [title]
+                for i, c in enumerate(offenders):
+                    if i:
+                        parts.append(" · ")
+                    parts += [c, " " + of(gaps[c], snapshots[c], first=i == 0)]
+                self.add(CONSUMABLES, parts, key, offenders)
+
+        # No vantus: only pulls where at least half the raid had one, so skipping it on farm
+        # bosses is never called out.
+        vantus_pulls: Counter = Counter()
+        without: Counter = Counter()
+        for players in night.auras_at_pull.values():
+            has = {c for c, auras in players.items() if any(a.startswith(VANTUS_PREFIX) for a in auras)}
+            if players and len(has) * 2 >= len(players):
+                for c in players:
+                    vantus_pulls[c] += 1
+                    if c not in has:
+                        without[c] += 1
+        skipped = sorted((c for c, n in without.items() if n * 2 >= vantus_pulls[c]),
+                         key=lambda c: (-without[c], c.name.casefold()))
+        if skipped:
+            parts = ["📜 **No vantus** (on pulls where most of the raid had one): "]
+            # People with the same count share one entry: "A, B and C, all 4 pulls".
+            runs: list[tuple[tuple[int, int], list[Char]]] = []
+            for c in skipped:
+                count = (without[c], vantus_pulls[c])
+                if runs and runs[-1][0] == count:
+                    runs[-1][1].append(c)
+                else:
+                    runs.append((count, [c]))
+            for i, ((n, total), chars) in enumerate(runs):
+                if i:
+                    parts.append(" · ")
+                comma = "," if len(chars) > 1 else ""
+                parts += [*joined(chars), f"{comma} all {total} pulls" if n == total else f"{comma} " + of(n, total, first=i == 0)]
+            self.add(CONSUMABLES, parts, "no_vantus", skipped)
+
 
 def build_lines(night: Night, settings: RecapSettings, history: History | None = None) -> list[Line]:
     builder = Builder(night, settings, history or NoHistory())
@@ -486,6 +635,7 @@ def build_lines(night: Night, settings: RecapSettings, history: History | None =
     builder.highlights()
     builder.lowlights()
     builder.deaths()
+    builder.consumables()
     return builder.lines
 
 

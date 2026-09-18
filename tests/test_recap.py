@@ -160,7 +160,56 @@ def test_thread_sections_in_order():
     r = full_text()
     assert [m.text.splitlines()[0] for m in r.thread] == [
         "🗺️ **The night**", "📊 **Parses**", "🌟 **Highlights**", "🤡 **Lowlights**", "💀 **Deaths**",
+        "🧪 **Consumables**",
     ]
+
+
+def test_consumables():
+    section = full_text().thread[-1].text.splitlines()
+    assert section[:10] == [
+        "🧪 **Consumables**",
+        "🔮 **Tryhards** (Void-Touched rune): **Pumper** every pull · **Middling** 3 of 5",
+        "🍺 **Potion seller:** **Pumper**, 6 combat potions in 5 pulls",
+        "🫗 **Mana chugger:** **Healz**, 4 mana potions",
+        "🍪 **Cookie monster:** **Middling**, 10 healthstones and health potions",
+        # Tanky drank none; Greyson one in 5. Healz drank mana potions, so isn't a hoarder.
+        "🧪 **Potion hoarders** (no combat potion): **Tanky**, not a single one all night · **Greyson** on 4 of 5 pulls",
+        # Dyer died 3 times but used healthstones; Greyson died twice and used nothing (Fortifying
+        # Brew is a class ability, not a consumable).
+        "🪦 **Died with a healthstone in the bag** (not one healthstone or health potion all night): **Greyson** died twice",
+        "⚗️ **No flask:** **Greyson** on 2 of 5 pulls",
+        "🍗 **Forgot to eat:** **Dyer** on 2 of 5 pulls",
+        # Only Boss C's pulls count: nobody used a vantus on A or B.
+        "📜 **No vantus** (on pulls where most of the raid had one): **Greyson** all 2 pulls",
+    ]
+
+
+def test_healer_with_no_potions_of_any_kind_is_a_hoarder():
+    data = report()
+    data["casts"]["data"]["entries"] = [e for e in data["casts"]["data"]["entries"] if "Mana" not in e["name"]]
+    assert "**Healz**, no potion of any kind all night" in all_text(full_text(data))
+
+
+def test_consumables_are_retail_only():
+    data = report()
+    for key in ("damageDone", "healing", "damageTaken", "casts"):
+        data[key]["data"]["gameVersion"] = 4  # a Classic log
+    assert "Consumables" not in all_text(full_text(data))
+
+
+def test_no_casts_data_means_no_healthstone_accusations():
+    data = report()
+    del data["casts"]
+    text = all_text(full_text(data))
+    assert "Died with a healthstone" not in text and "Tryhards" in text
+
+
+def test_combat_potion_names_are_a_setting():
+    from bot.wcl import _potion_filter
+    assert _potion_filter(SETTINGS) == (
+        "type = 'applybuff' and ability.name in ('Potion of Recklessness', 'Light''s Potential')"
+    )
+    assert "ability.id = 0" in _potion_filter(replace(SETTINGS, combat_potions=()))
 
 
 def test_the_night():
@@ -260,7 +309,7 @@ def test_leaderboard_ping_setting():
     night = analyze(report(), SETTINGS)
     lines = build_lines(night, SETTINGS)
     quiet = render_report(night, lines, URL, lambda c: None, thread_ping_everyone=False)
-    assert [m.pings for m in quiet.thread] == [True, False, True, True, True]
+    assert [m.pings for m in quiet.thread] == [True, False, True, True, True, True]
 
 
 def test_fmt_health():

@@ -50,6 +50,14 @@ def _zone(name: str) -> ZoneInfo:
         raise SystemExit(f"{name} must be a timezone like America/Chicago, got {value!r}")
 
 
+def _names(name: str, default: tuple[str, ...]) -> tuple[str, ...]:
+    """A comma-separated list of in-game names, e.g. COMBAT_POTIONS=Potion of Recklessness,Light's Potential"""
+    value = _str(name)
+    if value is None:
+        return default
+    return tuple(part.strip() for part in value.split(",") if part.strip())
+
+
 def _choice(name: str, allowed: set[str]) -> str | None:
     value = _str(name)
     if value is None:
@@ -72,6 +80,11 @@ class RecapSettings:
     deaths_include_trash: bool = False
     compare: str | None = None  # None = let WCL pick, same as the report page
     timeframe: str | None = None
+    # Consumable names change every expansion; these are Midnight's. Healthstones, health/mana
+    # potions, flasks, food and vantus runes are recognised by name pattern and need no list.
+    combat_potions: tuple[str, ...] = ("Potion of Recklessness", "Light's Potential")
+    tryhard_runes: tuple[str, ...] = ("Void-Touched",)
+    extra_health_items: tuple[str, ...] = ()
 
     @classmethod
     def from_env(cls) -> "RecapSettings":
@@ -84,6 +97,9 @@ class RecapSettings:
             deaths_include_trash=_bool("DEATHS_INCLUDE_TRASH", False),
             compare=_choice("WCL_COMPARE", COMPARE_VALUES),
             timeframe=_choice("WCL_TIMEFRAME", TIMEFRAME_VALUES),
+            combat_potions=_names("COMBAT_POTIONS", cls.combat_potions),
+            tryhard_runes=_names("TRYHARD_RUNES", cls.tryhard_runes),
+            extra_health_items=_names("EXTRA_HEALTH_ITEMS", cls.extra_health_items),
         )
 
 

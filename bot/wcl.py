@@ -69,6 +69,8 @@ _WHOLE_NIGHT = f"killType: Encounters, startTime: 0, endTime: {_END}"
 #   which would put nearly every healer in the grey list, so both are fetched explicitly.
 # - Deaths come from the events feed, not the deaths table: the table silently stops at 200.
 # - Wipes have no parses, so prog nights use the damage/healing tables instead.
+# - Consumables: combatantInfo is each player's buffs at the start of every pull (flask, food, rune,
+#   vantus); combat potions are their buffs; healthstones and health/mana potions are casts.
 _FULL_QUERY = """
 query Recap($code: String!, $deathsKillType: KillType) {
   reportData {
@@ -94,6 +96,11 @@ query Recap($code: String!, $deathsKillType: KillType) {
       resurrectEvents: events(filterExpression: "type = 'resurrect'", %(night)s, limit: 10000) {
         data nextPageTimestamp
       }
+      combatantInfo: events(dataType: CombatantInfo, %(night)s, limit: 10000) { data nextPageTimestamp }
+      potionEvents: events(filterExpression: "%(potion_filter)s", %(night)s, limit: 10000) {
+        data nextPageTimestamp
+      }
+      casts: table(dataType: Casts, viewBy: Ability, %(night)s)
     }
   }
 }
@@ -118,7 +125,25 @@ _EVENT_PAGES = {
         "params": "$code: String!, $start: Float!",
         "filter": "filterExpression: \"type = 'resurrect'\", killType: Encounters",
     },
+    "combatantInfo": {
+        "params": "$code: String!, $start: Float!",
+        "filter": "dataType: CombatantInfo, killType: Encounters",
+    },
+    "potionEvents": {
+        "params": "$code: String!, $start: Float!",
+        "filter": "filterExpression: \"%(potion_filter)s\", killType: Encounters",
+    },
 }
+
+
+def _potion_filter(settings: RecapSettings) -> str:
+    """WCL filter for the combat potion buffs named in COMBAT_POTIONS, escaped for a GraphQL string.
+    Names go in as quoted strings, so Light's Potential becomes 'Light''s Potential'."""
+    if not settings.combat_potions:
+        return "type = 'applybuff' and ability.id = 0"  # matches nothing
+    names = ", ".join("'" + name.replace("'", "''") + "'" for name in settings.combat_potions)
+    expression = f"type = 'applybuff' and ability.name in ({names})"
+    return expression.replace("\\", "\\\\").replace('"', '\\"')
 
 
 def _rankings_args(settings: RecapSettings) -> str:
@@ -199,24 +224,27 @@ class WCLClient:
         return await self.query(ref.host, _STATUS_QUERY, {"code": ref.code})
 
     async def report_full(self, ref: ReportRef, settings: RecapSettings) -> dict:
-        query = _FULL_QUERY % {"rankings_args": _rankings_args(settings), "end": _END, "night": _WHOLE_NIGHT}
+        potion_filter = _potion_filter(settings)
+        query = _FULL_QUERY % {"rankings_args": _rankings_args(settings), "end": _END, "night": _WHOLE_NIGHT,
+                               "potion_filter": potion_filter}
         variables = {"code": ref.code, "deathsKillType": "All" if settings.deaths_include_trash else "Encounters"}
         report = await self.query(ref.host, query, variables)
-        report["deaths"] = await self._all_events(ref, report.pop("deathEvents", None), "deathEvents", variables)
-        report["resurrects"] = await self._all_events(
-            ref, report.pop("resurrectEvents", None), "resurrectEvents", variables
-        )
+        for field, key in (("deathEvents", "deaths"), ("resurrectEvents", "resurrects"),
+                           ("combatantInfo", "combatantInfo"), ("potionEvents", "potions")):
+            report[key] = await self._all_events(ref, report.pop(field, None), field, variables, potion_filter)
         return report
 
-    async def _all_events(self, ref: ReportRef, page: dict | None, field: str, variables: dict) -> list:
+    async def _all_events(self, ref: ReportRef, page: dict | None, field: str, variables: dict,
+                          potion_filter: str) -> list:
         page = page or {}
         events = list(page.get("data") or [])
         spec = _EVENT_PAGES[field]
         while page.get("nextPageTimestamp") is not None:
             wanted = {k: v for k, v in variables.items() if f"${k}" in spec["params"]}
+            filter_text = spec["filter"] % {"potion_filter": potion_filter} if "%(" in spec["filter"] else spec["filter"]
             more = await self.query(
                 ref.host,
-                _MORE_EVENTS_QUERY % {**spec, "end": _END},
+                _MORE_EVENTS_QUERY % {"params": spec["params"], "filter": filter_text, "end": _END},
                 {**wanted, "start": page["nextPageTimestamp"]},
             )
             page = more.get("page") or {}

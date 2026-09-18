@@ -5,6 +5,15 @@ tests/fixtures/ holds real logs; this one pins down edge cases by hand. The nigh
   Boss B: killed first pull
   Boss C: two wipes, never killed (progress)
 Six raiders, plus a bystander who shows up in the log but never pulls a boss.
+
+Consumables (5 boss pulls):
+  Pumper: Void-Touched rune every pull, a combat potion every pull plus one extra (6), a healthstone
+  Middling: rune on 3 of 5 pulls, potions on 4, 10 health potions (cookie monster)
+  Greyson: no flask on 2 pulls, no vantus, one combat potion (hoarder), no healthstone, died twice
+  Dyer: no food on 2 pulls, rune once, potions on 3 of 5, healthstones
+  Tanky: no combat potion at all
+  Healz: healer, no combat potion but 4 mana potions (not a hoarder; the mana chugger)
+The raid used vantus runes on Boss C (pulls 5 and 6) only.
 """
 
 RAID = [1, 2, 3, 4, 5, 6]
@@ -53,7 +62,44 @@ def _death(target, fight, time, ability):
 def _table(**totals):
     ids = {a["name"]: a["id"] for a in ACTORS}
     return {"data": {"entries": [{"name": n, "id": ids[n], "total": t} for n, t in totals.items()],
-                     "totalTime": 800_000}}
+                     "totalTime": 800_000, "gameVersion": 1}}  # 1 = retail
+
+
+BOSS_PULLS = [1, 2, 3, 5, 6]
+
+
+def _snapshot(pid, fight):
+    """What a player had on as the pull started."""
+    auras = ["Arcane Intellect"]
+    if not (pid == 4 and fight in (5, 6)):
+        auras.append("Flask of the Magisters")  # Greyson skipped his flask on Boss C
+    if not (pid == 5 and fight in (1, 2)):
+        auras.append("Hearty Well Fed")  # Dyer forgot to eat twice
+    if pid == 3 or (pid == 6 and fight in (1, 2, 3)) or (pid == 5 and fight == 1):
+        auras.append("Void-Touched")
+    if fight in (5, 6) and pid != 4:
+        auras.append("Vantus Rune: Boss C")
+    return {"type": "combatantinfo", "fight": fight, "sourceID": pid,
+            "auras": [{"name": a, "ability": 1000 + i} for i, a in enumerate(auras)]}
+
+
+def _potions():
+    drank = {3: BOSS_PULLS + [6], 6: [1, 2, 3, 5], 5: [1, 2, 3], 4: [1]}  # Tanky and Healz: none
+    return [{"type": "applybuff", "sourceID": pid, "targetID": pid, "fight": f, "abilityGameID": 1236994}
+            for pid, fights in drank.items() for f in fights]
+
+
+def _cast_table():
+    def entry(name, **by_player):
+        return {"name": name, "guid": sum(map(ord, name)), "total": sum(by_player.values()),
+                "sources": [{"name": n, "total": t} for n, t in by_player.items()]}
+    return {"data": {"gameVersion": 1, "entries": [
+        entry("Healthstone", Pumper=1, Dyer=2),
+        entry("Silvermoon Health Potion", Middling=10),
+        entry("Lightfused Mana Potion", Healz=4),
+        entry("Potion of Recklessness", Pumper=6),  # a combat potion: counted from buffs, not here
+        entry("Fortifying Brew", Greyson=5),  # a class ability, not a consumable
+    ]}}
 
 
 def _casts(**counts):
@@ -134,4 +180,7 @@ def report():
             {"type": "resurrect", "sourceID": 2, "targetID": 5, "fight": 2},
             {"type": "resurrect", "sourceID": 2, "targetID": 5, "fight": 5},
         ],
+        "combatantInfo": [_snapshot(pid, f) for f in BOSS_PULLS for pid in RAID],
+        "potions": _potions(),
+        "casts": _cast_table(),
     }

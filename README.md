@@ -14,7 +14,7 @@ full report in a thread under it.
 🧵 Full report in the thread ↓
 ```
 
-The thread has five sections, each posted only if it has something to say:
+The thread has six sections, each posted only if it has something to say:
 
 | Section | What's in it |
 |---|---|
@@ -23,6 +23,7 @@ The thread has five sections, each posted only if it has something to say:
 | 🌟 Highlights | 🩷 Pink parse, 🎵 Metronome, 🦶 Kick captain, 🧼 Dispel machine, 🪄 Necromancer, 🧍 Last one standing |
 | 🤡 Lowlights | 🚽 Parse of shame, 🎢 Rollercoaster, ⚔️ Battle healer, 🧽 Damage sponge, 🛡️ Outdamaged by a tank |
 | 💀 Deaths | 💀 Floor inspector, 🐤 Canary, 🎁 Couldn't wait for loot, 🎯 Nemesis, 🧲 Brez magnet, ⏱️ Speedrunner |
+| 🧪 Consumables | 🔮 Tryhards (Void-Touched rune), 🍺 Potion seller, 🫗 Mana chugger, 🍪 Cookie monster, 🧪 Potion hoarders, 🪦 Died with a healthstone in the bag, ⚗️ No flask, 🍗 Forgot to eat, 📜 No vantus. Retail only |
 
 How the numbers work:
 
@@ -40,6 +41,13 @@ How the numbers work:
   and "(3 raids running)" when someone wins the same callout again.
 - **Every callout checks whether the night gives it something worth saying** and stays silent
   otherwise, so the report is as long as the night was eventful.
+- **Consumables** (retail): flask, food, augment rune and vantus come from the buffs WCL records on
+  each player as every pull starts. Combat potions are counted per pull; healthstones and
+  health/mana potions from casts. DPS and tanks are potion hoarders if they skipped a combat potion
+  on more than half their pulls; healers only if they drank no potion of any kind (combat or mana)
+  all night. "No vantus" only counts pulls where at least half the raid had one. "Died with a
+  healthstone in the bag" is anyone who used no healthstone or health potion all night and died at
+  least twice.
 - **Retail and Classic.** The bot reads the WCL site from the link (`www.`, `classic.`, `fresh.`,
   `vanilla.`).
 - Logs must be uploaded as **Public or Unlisted**. Private logs can't be read by bots.
@@ -47,6 +55,15 @@ How the numbers work:
 **Pings:** the headline pings everyone it names. In the thread, each person is pinged once, on their
 first mention, and Discord adds them to the thread. Set `THREAD_PING_EVERYONE=false` to stop the
 parse leaderboard from pinging the whole raid; award winners are still pinged.
+
+### Updating consumables for a new expansion
+
+Healthstones, health and mana potions, flasks, food and vantus runes are recognised by name
+pattern ("Healthstone", "Health Potion", "Healing Potion", "Mana Potion", "Flask of", "Phial of",
+"Well Fed", "Vantus Rune"), so they carry over. Two lists don't follow a pattern and live in the
+`.env`: `COMBAT_POTIONS` (Midnight: Potion of Recklessness, Light's Potential) and `TRYHARD_RUNES`
+(Void-Touched). A health potion with an unusual name can be added with `EXTRA_HEALTH_ITEMS`. To find
+new names, run the probe on a fresh log and look at the potions people actually used.
 
 ## How it decides when to post
 
@@ -86,7 +103,7 @@ under the headline instead.
 
 Go to <https://www.warcraftlogs.com/api/clients> and create a client. The redirect URL is required
 but unused; put `http://localhost`. Copy the client ID and secret. One client works on retail and
-every Classic site. A report costs about 15 of the 3,600 points WCL allows per hour.
+every Classic site. A report costs roughly 20-45 of the 3,600 points WCL allows per hour.
 
 ### 3. IDs
 

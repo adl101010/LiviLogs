@@ -23,6 +23,9 @@ services:
       DEATHS_INCLUDE_TRASH: ${DEATHS_INCLUDE_TRASH:-false}
       WCL_COMPARE: ${WCL_COMPARE:-}
       WCL_TIMEFRAME: ${WCL_TIMEFRAME:-}
+      COMBAT_POTIONS: ${COMBAT_POTIONS:-}
+      TRYHARD_RUNES: ${TRYHARD_RUNES:-}
+      EXTRA_HEALTH_ITEMS: ${EXTRA_HEALTH_ITEMS:-}
     volumes:
       - livilogs-data:/data
 

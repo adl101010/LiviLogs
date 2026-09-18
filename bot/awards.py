@@ -334,9 +334,9 @@ class Builder:
                 for i, p in enumerate(entries):
                     now = parse_colour(p.average)
                     if i == 0:
-                        parts += [f"{now} ", p.char, f" **{p.average:.1f}** 👑"]
+                        parts += [f"{now} - ", p.char, f" **{p.average:.1f}** 👑"]
                     elif now != colour or i == 1:
-                        parts += [f"\n{now} ", p.char, f" {p.average:.1f}"]
+                        parts += [f"\n{now} - ", p.char, f" {p.average:.1f}"]
                     else:
                         parts += [" · ", p.char, f" {p.average:.1f}"]
                     colour = now

@@ -182,9 +182,9 @@ def test_the_night():
 def test_leaderboard_one_block_per_role():
     card = full_text().thread[1]
     assert card.blocks == [
-        "**⚔️ Damage**\n🟪 **Pumper** **94.5** 👑\n🟪 **Middling** 90.0\n🟩 **Dyer** 45.0\n⬜ **Greyson** 20.0",
-        "**💚 Healing**\n🟦 **Healz** **65.0** 👑",
-        "**🛡️ Tanks**\n⬜ **Tanky** **6.5** 👑",
+        "**⚔️ Damage**\n🟪 - **Pumper** **94.5** 👑\n🟪 - **Middling** 90.0\n🟩 - **Dyer** 45.0\n⬜ - **Greyson** 20.0",
+        "**💚 Healing**\n🟦 - **Healz** **65.0** 👑",
+        "**🛡️ Tanks**\n⬜ - **Tanky** **6.5** 👑",
     ]
 
 

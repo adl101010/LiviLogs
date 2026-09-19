@@ -246,6 +246,7 @@ def test_consumables_card():
 def test_healer_with_no_potions_of_any_kind_is_a_hoarder():
     data = report()
     data["casts"]["data"]["entries"] = [e for e in data["casts"]["data"]["entries"] if "Mana" not in e["name"]]
+    data["manaPotions"] = []
     assert "**Healz** no potion of any kind all night" in all_text(full_text(data))
 
 

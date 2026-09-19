@@ -206,18 +206,22 @@ def parse_chart(night: Night) -> bytes | None:
 
 # --- consumables -------------------------------------------------------------------------------
 
+def potions_used(row: ConsumableRow) -> tuple[str, str]:
+    """Every potion drunk: "23", or for a healer "22 mana" / "3 + 22 mana"."""
+    if row.role == HEALER and row.mana_potions:
+        text = f"{row.combat_potions} + {row.mana_potions} mana" if row.combat_potions else f"{row.mana_potions} mana"
+        return text, "plain"
+    return str(row.combat_potions), "plain" if row.combat_potions else "dim"
+
+
 def _consumable_cells(row: ConsumableRow, show_vantus: bool, show_rune: bool) -> list[tuple[str, str]]:
     """(text, style) per column. Styles: ok, warn, star, dim, plain."""
     def fraction(have: int, total: int, flag: str) -> tuple[str, str]:
         style = "warn" if flag in row.flags else "ok" if have == total else "plain"
         return f"{have}/{total}", style
 
-    cells = [fraction(row.flask, row.snapshots, "no_flask"), fraction(row.food, row.snapshots, "no_food")]
-    if row.role == HEALER:
-        text = f"{row.mana_potions} mana" if row.mana_potions else "none"
-        cells.append((text, "warn" if "hoarder" in row.flags else "plain" if row.mana_potions else "dim"))
-    else:
-        cells.append(fraction(row.potion_pulls, row.pulls, "hoarder"))
+    cells = [fraction(row.flask, row.snapshots, "no_flask"), fraction(row.food, row.snapshots, "no_food"),
+             fraction(row.potted, row.pulls, "hoarder"), potions_used(row)]
     cells.append((str(row.health_items),
                   "warn" if "healthstone_bag" in row.flags else "plain" if row.health_items else "dim"))
     if show_vantus:
@@ -237,28 +241,36 @@ def consumables_chart(night: Night, settings: RecapSettings) -> bytes | None:
         return None
     show_vantus = any(r.vantus_pulls for r in rows)
     show_rune = bool(settings.tryhard_runes)
-    columns = ["Flask", "Food", "Combat potion", "Healthstone / potion"]
+    columns = [("Flask", 76), ("Food", 76), ("Pulls potted", 76), ("Potions used", 96),
+               ("Healthstone / potion", 76)]
     if show_vantus:
-        columns.append("Vantus")
+        columns.append(("Vantus", 76))
     if show_rune:
-        columns.append(" / ".join(settings.tryhard_runes))
+        columns.append((" / ".join(settings.tryhard_runes), 76))
+    starts = []
+    x = 0
+    for _, w in columns:
+        starts.append(x)
+        x += w + 3
+    notes = ["Pulls potted: pulls with at least one potion, out of pulls they were in (healers: mana potions count).",
+             "Potions used: every potion drunk all night. Two on one pull counts as two."]
 
     name_w = max(text_width(r.char.name, 13) for r in rows) + 14
-    cell_w, cell_h, gap = 76, 24, 3
+    cell_h, gap = 24, 3
     left, top, header_h = 16, 60, 34
     groups = [(label, [r for r in rows if r.role == role]) for role, label in ROLE_ORDER]
     groups = [(label, members) for label, members in groups if members]
-    width = max(left + name_w + len(columns) * (cell_w + gap) + 16, 420)
-    height = top + header_h + len(groups) * 22 + len(rows) * (cell_h + gap) + 44
+    width = max(left + name_w + x + 16, max(text_width(n, 11) for n in notes) + 32)
+    height = top + header_h + len(groups) * 22 + len(rows) * (cell_h + gap) + 44 + 17 * len(notes)
 
     canvas = Canvas(width, height)
-    _header(canvas, "Consumables", "pulls they had it on, out of pulls they were in")
+    _header(canvas, "Consumables", "flask, food, vantus and rune: pulls they had it on, out of pulls they were in")
     x0 = left + name_w
-    for i, name in enumerate(columns):
+    for (name, cell_w), start in zip(columns, starts):
         wrapped = wrap(name, cell_w, 10)
         for j, piece in enumerate(wrapped):
             y = top + header_h - 4 - (len(wrapped) - j) * 13
-            canvas.text(x0 + i * (cell_w + gap) + cell_w / 2, y, piece, 10, MUTED, anchor="ma")
+            canvas.text(x0 + start + cell_w / 2, y, piece, 10, MUTED, anchor="ma")
 
     y = top + header_h
     fills = {"ok": (CELL, OK), "warn": (WARN_BG, WARN), "star": (STAR_BG, STAR), "dim": (CELL, FAINT),
@@ -268,8 +280,9 @@ def consumables_chart(night: Night, settings: RecapSettings) -> bytes | None:
         y += 22
         for row in members:
             canvas.text(left, y + cell_h / 2, row.char.name, 13, TEXT, anchor="lm")
-            for i, (text, style) in enumerate(_consumable_cells(row, show_vantus, show_rune)):
-                x = x0 + i * (cell_w + gap)
+            cells = _consumable_cells(row, show_vantus, show_rune)
+            for (text, style), (_, cell_w), start in zip(cells, columns, starts):
+                x = x0 + start
                 background, colour = fills[style]
                 canvas.rect(x, y, cell_w, cell_h, background)
                 canvas.text(x + cell_w / 2, y + cell_h / 2, text, 12, colour, bold=style in ("warn", "star"),
@@ -280,6 +293,8 @@ def consumables_chart(night: Night, settings: RecapSettings) -> bytes | None:
     if show_rune:
         items.append(("tryhard", STAR))
     _legend(canvas, left, y + 14, items)
+    for i, note in enumerate(notes):
+        canvas.text(left, y + 38 + i * 17, note, 11, MUTED)
     return canvas.png()
 
 

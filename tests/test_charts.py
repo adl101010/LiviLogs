@@ -111,3 +111,25 @@ def test_without_charts_nothing_changes():
     lines = build_lines(night, SETTINGS)
     plain = render_report(night, lines, "u", lambda c: None)
     assert not any(isinstance(b, Chart) for c in plain.thread for b in c.blocks)
+
+
+def test_grid_shows_pulls_potted_and_potions_used():
+    from bot.charts import _consumable_cells
+
+    night = analyze(report(), SETTINGS)
+    cells = {r.char.name: _consumable_cells(r, True, True) for r in consumable_rows(night, SETTINGS)}
+    # Columns: flask, food, pulls potted, potions used, healthstones, vantus, rune.
+    assert cells["Pumper"][2:4] == [("5/5", "ok"), ("6", "plain")]  # a second potion on one pull
+    assert cells["Greyson"][2:4] == [("1/5", "warn"), ("1", "plain")]  # a potion hoarder
+    assert cells["Tanky"][2:4] == [("0/5", "warn"), ("0", "dim")]
+    # Healers: mana potions count as potted pulls and are called out in the total.
+    assert cells["Healz"][2:4] == [("3/5", "plain"), ("4 mana", "plain")]
+
+
+def test_healer_with_both_kinds_of_potion():
+    from bot.charts import potions_used
+
+    night = analyze(report(), SETTINGS)
+    healz = next(r for r in consumable_rows(night, SETTINGS) if r.char.name == "Healz")
+    healz.combat_potions = 3
+    assert potions_used(healz) == ("3 + 4 mana", "plain")

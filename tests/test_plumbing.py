@@ -115,3 +115,32 @@ def test_store_links_and_reports():
     assert [c.name for c in store.last_recap_characters()] == ["Bob", "Alice"]
 
     assert store.unlink(bob) and store.user_for(bob) is None
+
+
+def test_mana_potion_filter_uses_the_logs_own_ability_ids():
+    from bot.wcl import _mana_potion_filter
+
+    report = {"masterData": {"abilities": [
+        {"gameID": 1236648, "name": "Lightfused Mana Potion"},
+        {"gameID": 55, "name": "Silvermoon Health Potion"},
+        {"gameID": 1200, "name": "Algari Mana Potion"},
+    ]}}
+    assert _mana_potion_filter(report) == "type = 'cast' and ability.id in (1200, 1236648)"
+    assert _mana_potion_filter({"masterData": {"abilities": []}}) is None
+
+
+def test_mana_potions_per_pull_replace_the_cast_table_count():
+    from bot.config import RecapSettings
+    from bot.recap import analyze
+
+    from .sample_report import report
+
+    data = report()
+    night = analyze(data, RecapSettings())
+    healz = next(c for c in night.roster if c.name == "Healz")
+    assert night.mana_by_pull[healz] == {1: 1, 5: 1, 6: 2}
+    assert night.mana_potions[healz] == 4
+
+    del data["manaPotions"]  # a report saved before per-pull mana potions: the table total still works
+    night = analyze(data, RecapSettings())
+    assert night.mana_by_pull == {} and night.mana_potions[healz] == 4

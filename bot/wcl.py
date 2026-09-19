@@ -13,6 +13,7 @@ from typing import Callable
 import httpx
 
 from .config import RecapSettings, wcl_credentials
+from .recap import MANA_POTION_PATTERN
 
 log = logging.getLogger(__name__)
 
@@ -141,7 +142,24 @@ _EVENT_PAGES = {
         "params": "$code: String!, $start: Float!",
         "filter": "filterExpression: \"%(potion_filter)s\", killType: Encounters",
     },
+    "manaPotionEvents": {
+        "params": "$code: String!, $start: Float!",
+        "filter": "filterExpression: \"%(mana_filter)s\", killType: Encounters",
+    },
 }
+
+# Mana potions change name every expansion, and WCL's filters can't match part of a name. So the
+# report's own list of abilities is searched for MANA_POTION_PATTERN, and the casts fetched by id.
+
+
+def _mana_potion_filter(report: dict) -> str | None:
+    """WCL filter for casts of any mana potion that appears in this report, or None if none does."""
+    abilities = (report.get("masterData") or {}).get("abilities") or []
+    ids = sorted({a["gameID"] for a in abilities
+                  if MANA_POTION_PATTERN in (a.get("name") or "") and isinstance(a.get("gameID"), int)})
+    if not ids:
+        return None
+    return f"type = 'cast' and ability.id in ({', '.join(map(str, ids))})"
 
 
 def _potion_filter(settings: RecapSettings) -> str:
@@ -244,20 +262,28 @@ class WCLClient:
                                "potion_filter": potion_filter}
         variables = {"code": ref.code, "deathsKillType": "All" if settings.deaths_include_trash else "Encounters"}
         report = await self.query(ref.host, query, variables)
+        filters = {"potion_filter": potion_filter, "mana_filter": _mana_potion_filter(report)}
         for field, key in (("deathEvents", "deaths"), ("resurrectEvents", "resurrects"),
                            ("combatantInfo", "combatantInfo"), ("potionEvents", "potions"),
                            ("powerInfusion", "powerInfusion")):
-            report[key] = await self._all_events(ref, report.pop(field, None), field, variables, potion_filter)
+            report[key] = await self._all_events(ref, report.pop(field, None), field, variables, filters)
+        # Mana potions per pull: a second, small query, and only if the log has any.
+        report["manaPotions"] = (
+            await self._all_events(ref, {"nextPageTimestamp": 0}, "manaPotionEvents", variables, filters)
+            if filters["mana_filter"] else []
+        )
         return report
 
     async def _all_events(self, ref: ReportRef, page: dict | None, field: str, variables: dict,
-                          potion_filter: str) -> list:
+                          filters: dict[str, str | None]) -> list:
+        """Every event of one feed: the page already fetched, then any further pages. Passing
+        {"nextPageTimestamp": 0} as the page fetches the whole feed from the start."""
         page = page or {}
         events = list(page.get("data") or [])
         spec = _EVENT_PAGES[field]
         while page.get("nextPageTimestamp") is not None:
             wanted = {k: v for k, v in variables.items() if f"${k}" in spec["params"]}
-            filter_text = spec["filter"] % {"potion_filter": potion_filter} if "%(" in spec["filter"] else spec["filter"]
+            filter_text = spec["filter"] % filters if "%(" in spec["filter"] else spec["filter"]
             more = await self.query(
                 ref.host,
                 _MORE_EVENTS_QUERY % {"params": spec["params"], "filter": filter_text, "end": _END},

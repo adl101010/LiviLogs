@@ -184,5 +184,7 @@ def report():
         "powerInfusion": [{"type": "applybuff", "sourceID": 2, "targetID": 3, "fight": f} for f in (1, 2, 3, 5)]
                          + [{"type": "applybuff", "sourceID": 2, "targetID": 2, "fight": f} for f in BOSS_PULLS],
         "potions": _potions(),
+        # Healz's 4 mana potions as casts, per pull: two on pull 6, one each on 1 and 5.
+        "manaPotions": [{"type": "cast", "sourceID": 2, "fight": f, "abilityGameID": 1236648} for f in (1, 5, 6, 6)],
         "casts": _cast_table(),
     }

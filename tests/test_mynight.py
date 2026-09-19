@@ -36,16 +36,22 @@ def test_card_shows_parses_deaths_consumables_and_awards():
     assert "⬜ - Boss A 10" in text and "🟩 - Boss B 30" in text
     assert "**💀 2 deaths** before the wipe was called" in text
     assert "first to die once" in text
-    assert "⚠️ Flask 3/5" in text and "⚠️ Vantus 0/2" in text and "⚠️ Combat potion 1/5" in text
-    assert "-# ⚠️ = the report called it out" in text
+    assert "⚠️ Flask 3/5" in text and "⚠️ Vantus 0/2" in text
+    assert "⚠️ **Potions** · 1/5 pulls potted · 1 used\n🟢⚫⚫⚫⚫\n" in text
+    assert "⚠️ = the report called it out" in text
     assert "**🏅 In tonight's report** · " in text and "🗑️ Grey" in text
 
 
 def test_healer_card():
     text = card_for("Healz")
     assert "healing parse" in text
-    assert "Mana potions 4" in text and "⚠️ Mana" not in text  # drank mana potions: not a hoarder
+    # Mana potions count as potted pulls for healers: pulls 1, 5 and 6 (two on 6). Not a hoarder.
+    assert "\n**Potions** · 3/5 pulls potted · 4 used (all mana)\n🟢⚫⚫🟢🟣\n" in text
     assert "🪄 3 battle rezzes" in text
+
+
+def test_card_counts_every_potion_including_doubles():
+    assert "\n**Potions** · 5/5 pulls potted · 6 used\n🟢🟢🟢🟢🟣\n" in card_for("Pumper")
 
 
 def test_card_on_a_prog_night_shows_throughput_rank():

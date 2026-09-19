@@ -167,6 +167,8 @@ class Night:
     mana_potions: Counter = field(default_factory=Counter)
     dead_seconds: Counter = field(default_factory=Counter)  # time spent dead in boss pulls
     power_infusion: Counter = field(default_factory=Counter)  # (giver, receiver) -> times, self-casts excluded
+    potions_by_pull: dict[Char, Counter] = field(default_factory=dict)  # combat potions: pull -> how many
+    mana_by_pull: dict[Char, Counter] = field(default_factory=dict)  # mana potions: pull -> how many (if known)
 
     @property
     def has_parses(self) -> bool:
@@ -441,16 +443,28 @@ def _auras_at_pull(report: dict, players: dict[int, Char], pull_ids: set[int]) -
     return dict(out)
 
 
-def _combat_potions(report: dict, players: dict[int, Char], pull_ids: set[int]) -> tuple[dict[Char, set[int]], Counter]:
-    pulls: dict[Char, set[int]] = defaultdict(set)
-    count: Counter = Counter()
+def _combat_potions(report: dict, players: dict[int, Char], pull_ids: set[int]) -> dict[Char, Counter]:
+    """Combat potion buffs, per player per pull."""
+    by_pull: dict[Char, Counter] = defaultdict(Counter)
     events = report.get("potions")
     for e in events if isinstance(events, list) else []:
         char = players.get(e.get("targetID"))
         if char and e.get("fight") in pull_ids:
-            pulls[char].add(e["fight"])
-            count[char] += 1
-    return dict(pulls), count
+            by_pull[char][e["fight"]] += 1
+    return dict(by_pull)
+
+
+def _mana_potions(report: dict, players: dict[int, Char], pull_ids: set[int]) -> dict[Char, Counter] | None:
+    """Mana potion casts, per player per pull. None for reports fetched before these were."""
+    events = report.get("manaPotions")
+    if not isinstance(events, list):
+        return None
+    by_pull: dict[Char, Counter] = defaultdict(Counter)
+    for e in events:
+        char = players.get(e.get("sourceID"))
+        if char and e.get("fight") in pull_ids and e.get("type") == "cast":
+            by_pull[char][e["fight"]] += 1
+    return dict(by_pull)
 
 
 def is_health_item(name: str, extra: tuple[str, ...] = ()) -> bool:
@@ -550,8 +564,13 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
         for pid in p.players:
             if pid in players:
                 pulls_in[players[pid]].add(p.id)
-    potion_pulls, potions = _combat_potions(report, players, pull_ids)
+    potions_by_pull = _combat_potions(report, players, pull_ids)
+    potion_pulls = {c: set(n) for c, n in potions_by_pull.items()}
+    potions = Counter({c: sum(n.values()) for c, n in potions_by_pull.items()})
     health, mana = _consumable_casts(report, players, settings.extra_health_items)
+    mana_by_pull = _mana_potions(report, players, pull_ids)
+    if mana_by_pull is not None:  # the per-pull casts are the same count, limited to boss pulls
+        mana = Counter({c: sum(n.values()) for c, n in mana_by_pull.items()})
 
     return Night(
         title=report.get("title") or "Raid",
@@ -593,4 +612,6 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
         mana_potions=mana,
         dead_seconds=_time_dead(report, players, pulls, deaths),
         power_infusion=_power_infusion(report, players, pull_ids),
+        potions_by_pull=potions_by_pull,
+        mana_by_pull=mana_by_pull or {},
     )

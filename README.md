@@ -25,7 +25,8 @@ button:
 ```
 
 **👤 My night** shows whoever presses it a card only they can see: their parse on every boss, their
-deaths and what killed them, their consumables (with ⚠️ on anything the report called out), their
+deaths and what killed them, their consumables (with ⚠️ on anything the report called out, and a
+dot per pull for potions: 🟢 one, 🟣 two or more, ⚫ none), their
 interrupts, dispels and damage, and which callouts they got. It uses the characters an admin has
 linked to them; anyone not linked yet picks their character from a menu. The last 8 nights are kept
 in memory, so the button answers instantly; after a restart, or on an older report, the bot fetches
@@ -50,8 +51,12 @@ The thread has six sections, each its own card, posted only if it has something 
 
 - **Parses:** a grid of everyone's parse on every kill, in WCL's colours, with the night's average
   at the end. Replaces the leaderboard text.
-- **Consumables:** one row per raider (flask, food, combat potion, healthstones, vantus, rune).
-  Yellow marks what would have been called out, by the same rules as the callouts. Replaces the
+- **Consumables:** one row per raider (flask, food, pulls potted, potions used, healthstones,
+  vantus, rune). Yellow marks what would have been called out, by the same rules as the callouts.
+  *Pulls potted* is pulls with at least one potion, out of pulls they were in; *potions used* is
+  every potion drunk, so someone who drinks two on a long fight shows 18/18 and 23. For healers,
+  mana potions count as potted pulls and show in the total ("3 + 22 mana"). Mana potions are
+  found by name ("Mana Potion") in each log, so new expansions need no setting. Replaces the
   tryhard, hoarder, healthstone, flask, food and vantus callouts; the potion seller, mana chugger
   and cookie monster shoutouts stay as text.
 - **Progress:** a boss's health at the end of each pull, coloured by phase, with the best pull

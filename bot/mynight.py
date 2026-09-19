@@ -88,21 +88,39 @@ def _consumables(night: Night, char: Char, settings: RecapSettings) -> str | Non
         return f"⚠️ {label} {value}" if flag and flag in row.flags else f"{label} {value}"
 
     items = [item("Flask", f"{row.flask}/{row.snapshots}", "no_flask"),
-             item("Food", f"{row.food}/{row.snapshots}", "no_food")]
-    if row.role == HEALER:
-        items.append(item("Mana potions", str(row.mana_potions), "hoarder"))
-    else:
-        items.append(item("Combat potion", f"{row.potion_pulls}/{row.pulls}", "hoarder"))
-    items.append(item("Healthstones", str(row.health_items), "healthstone_bag"))
+             item("Food", f"{row.food}/{row.snapshots}", "no_food"),
+             item("Healthstones", str(row.health_items), "healthstone_bag")]
     if row.vantus_pulls:
         items.append(item("Vantus", f"{row.vantus}/{row.vantus_pulls}", "no_vantus"))
     if row.rune:
         rune = " / ".join(settings.tryhard_runes)
         items.append(("🔮 " if "tryhard" in row.flags else "") + f"{rune} {row.rune}/{row.snapshots}")
     text = "**🧪 Consumables**\n" + " · ".join(items)
+
+    # Potions: one dot per pull, in order, then the two numbers the grid shows.
+    used = f"{row.combat_potions} used"
+    if row.role == HEALER and row.mana_potions:
+        used = (f"{row.combat_potions} + {row.mana_potions} mana used" if row.combat_potions
+                else f"{row.mana_potions} used (all mana)")
+    potions = f"{row.potted}/{row.pulls} pulls potted · {used}"
+    text += "\n" + ("⚠️ " if "hoarder" in row.flags else "") + f"**Potions** · {potions}"
+    text += "\n" + _potion_dots(night, char, row.role == HEALER)
+    note = "🟢 one potion · 🟣 two or more · ⚫ none, one dot per pull in order"
     if any(f in row.flags for f in ("no_flask", "no_food", "hoarder", "healthstone_bag", "no_vantus")):
-        text += "\n-# ⚠️ = the report called it out"
-    return text
+        note += " · ⚠️ = the report called it out"
+    return text + f"\n-# {note}"
+
+
+def _potion_dots(night: Night, char: Char, healer: bool) -> str:
+    combat = night.potions_by_pull.get(char, {})
+    mana = night.mana_by_pull.get(char, {}) if healer else {}
+    mine = night.pulls_in.get(char, set())
+    dots = []
+    for pull in night.pulls:
+        if pull.id in mine:
+            n = combat.get(pull.id, 0) + mana.get(pull.id, 0)
+            dots.append("⚫" if n == 0 else "🟢" if n == 1 else "🟣")
+    return "".join(dots)
 
 
 def _extras(night: Night, char: Char) -> str | None:

@@ -710,12 +710,14 @@ class ConsumableRow:
     flask: int
     food: int
     rune: int
-    potion_pulls: int
+    potion_pulls: int  # pulls with a combat potion
     mana_potions: int
     health_items: int
     vantus: int  # of vantus_pulls
     vantus_pulls: int  # pulls where most of the raid had a vantus rune
     flags: set[str] = field(default_factory=set)  # tryhard, hoarder, healthstone_bag, no_flask, no_food, no_vantus
+    combat_potions: int = 0  # every combat potion drunk
+    potted: int = 0  # "pulls potted": pulls with at least one potion (for healers, a mana potion counts)
 
 
 def consumable_rows(night: Night, settings: RecapSettings) -> list[ConsumableRow]:
@@ -727,6 +729,12 @@ def consumable_rows(night: Night, settings: RecapSettings) -> list[ConsumableRow
         rows[char] = ConsumableRow(char, night.roles.get(char, DPS), 0, len(night.pulls_in.get(char, ())),
                                    0, 0, 0, len(night.potion_pulls.get(char, ())), night.mana_potions.get(char, 0),
                                    night.health_items.get(char, 0), 0, 0)
+    for char, row in rows.items():
+        row.combat_potions = night.potions.get(char, 0)
+        pulls = set(night.potions_by_pull.get(char, ()))
+        if row.role == HEALER:
+            pulls |= set(night.mana_by_pull.get(char, ()))
+        row.potted = len(pulls)
     for players in night.auras_at_pull.values():
         has_vantus = {c for c, auras in players.items() if any(a.startswith(VANTUS_PREFIX) for a in auras)}
         vantus_pull = bool(players) and len(has_vantus) * 2 >= len(players)

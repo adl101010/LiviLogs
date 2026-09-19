@@ -46,8 +46,9 @@ The thread has six sections, each its own card, posted only if it has something 
 | 🤡 Lowlights | 🚽 Parse of shame, 🎢 Rollercoaster, ⚔️ Battle healer, 🧽 Damage sponge, 🛡️ Outdamaged by a tank |
 | 💀 Deaths | 💀 Floor inspector, 🐤 Canary, 🎁 Couldn't wait for loot, 🎯 Nemesis, 🧲 Brez magnet, 👻 Ghost (most time spent dead, 3 minutes or more), ⏱️ Speedrunner |
 | 🧪 Consumables | 🔮 Tryhards (Void-Touched rune), 🍺 Potion seller, 🫗 Mana chugger, 🍪 Cookie monster, 🧪 Potion hoarders, 🪦 Died with a healthstone in the bag, ⚗️ No flask, 🍗 Forgot to eat, 📜 No vantus. Retail only |
+| 🛠️ Gear check | A chart of every raider's enchants and gems, then 🔧 Missing enchants, 🎁 Unwrapped loot (new piece worn unenchanted), 💎 Empty sockets. Retail only |
 
-**Charts.** Three parts of the thread are pictures the bot draws:
+**Charts.** Four parts of the thread are pictures the bot draws:
 
 - **Parses:** a grid of everyone's parse on every kill, in WCL's colours, with the night's average
   at the end. Replaces the leaderboard text.
@@ -61,6 +62,14 @@ The thread has six sections, each its own card, posted only if it has something 
   and cookie monster shoutouts stay as text.
 - **Progress:** a boss's health at the end of each pull, coloured by phase, with the best pull
   marked. Replaces the `▇▅▅▄` bar strip, for bosses pulled 3 or more times.
+- **Gear check:** one row per raider, a column each for helm, shoulders, chest, legs, boots, rings
+  and weapons, plus gems. Every pull is checked, so it also catches a piece looted mid-raid and
+  never enchanted ("new: 11 pulls"), and shows who enchanted partway through ("pull 4"). Rings, and
+  weapons for dual-wielders, are split in two, so one bare ring shows. Off hands count only for
+  dual-wield specs (or if someone enchanted theirs): shields and held items can't be enchanted.
+  The callouts stay as text under the chart so the people who need to fix something get pinged.
+  Empty sockets are found from the item's bonus ids (`SOCKET_BONUS_IDS`); WCL lists gems but not
+  sockets, and sockets added by crafting don't show up, so those can't be checked.
 
 A picture can't ping anyone, so a line of @mentions goes under the parse chart instead (unless
 `THREAD_PING_EVERYONE=false`). If Discord refuses a card, the fallback text has the original lines.
@@ -105,6 +114,10 @@ pattern ("Healthstone", "Health Potion", "Healing Potion", "Mana Potion", "Flask
 `.env`: `COMBAT_POTIONS` (Midnight: Potion of Recklessness, Light's Potential) and `TRYHARD_RUNES`
 (Void-Touched). A health potion with an unusual name can be added with `EXTRA_HEALTH_ITEMS`. To find
 new names, run the probe on a fresh log and look at the potions people actually used.
+
+The gear check's enchantable slots are Midnight's. `SOCKET_BONUS_IDS` lists the item bonus ids that
+mean "has a socket"; a new expansion may add new ones (look for bonus ids that only ever appear on
+items with gems in them).
 
 ## How it decides when to post
 
@@ -199,6 +212,7 @@ with the names replaced.
 | `bot/render.py` | Lines → cards: headline card, thread title, one card per section; plain-text version for fallback and the probe |
 | `bot/charts.py` | The parse, consumables and progress pictures (Pillow) |
 | `bot/mynight.py` | The private "My night" card |
+| `bot/gear.py` | The gear check: enchants on every pull, new loot left bare, empty sockets |
 | `bot/watch.py` | "Is this log finished?" |
 | `bot/store.py` | SQLite: links, seen characters, report status, history |
 | `bot/main.py` | Discord: channel watcher, slash commands, cards (components v2), threads, pings |

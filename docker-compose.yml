@@ -27,6 +27,7 @@ services:
       COMBAT_POTIONS: ${COMBAT_POTIONS:-}
       TRYHARD_RUNES: ${TRYHARD_RUNES:-}
       EXTRA_HEALTH_ITEMS: ${EXTRA_HEALTH_ITEMS:-}
+      SOCKET_BONUS_IDS: ${SOCKET_BONUS_IDS:-}
     volumes:
       - livilogs-data:/data
 

@@ -169,6 +169,8 @@ class Night:
     power_infusion: Counter = field(default_factory=Counter)  # (giver, receiver) -> times, self-casts excluded
     potions_by_pull: dict[Char, Counter] = field(default_factory=dict)  # combat potions: pull -> how many
     mana_by_pull: dict[Char, Counter] = field(default_factory=dict)  # mana potions: pull -> how many (if known)
+    gear_at_pull: dict[int, dict[Char, list["Item | None"]]] = field(default_factory=dict)  # pull -> player -> slots
+    specs: dict[Char, int] = field(default_factory=dict)  # WoW spec id
 
     @property
     def has_parses(self) -> bool:
@@ -432,6 +434,40 @@ def _game_version(report: dict) -> int | None:
     return None
 
 
+@dataclass(frozen=True)
+class Item:
+    """One equipped item as a pull started: enough to check enchants and gems."""
+    id: int
+    enchanted: bool
+    gems: int
+    bonus_ids: frozenset[int]
+
+
+def _gear_at_pull(report: dict, players: dict[int, Char],
+                  pull_ids: set[int]) -> tuple[dict[int, dict[Char, list[Item | None]]], dict[Char, int]]:
+    """Every player's gear as each pull started (a list by WoW slot number, None for an empty slot),
+    and their spec id."""
+    out: dict[int, dict[Char, list[Item | None]]] = defaultdict(dict)
+    specs: dict[Char, int] = {}
+    events = report.get("combatantInfo")
+    for e in events if isinstance(events, list) else []:
+        char = players.get(e.get("sourceID"))
+        if not char or e.get("fight") not in pull_ids:
+            continue
+        if isinstance(e.get("specID"), int):
+            specs[char] = e["specID"]
+        gear = e.get("gear")
+        if not isinstance(gear, list) or not gear:
+            continue
+        out[e["fight"]][char] = [
+            Item(it["id"], bool(it.get("permanentEnchant")), len(it.get("gems") or []),
+                 frozenset(b for b in it.get("bonusIDs") or [] if isinstance(b, int)))
+            if isinstance(it, dict) and it.get("id") else None
+            for it in gear
+        ]
+    return dict(out), specs
+
+
 def _auras_at_pull(report: dict, players: dict[int, Char], pull_ids: set[int]) -> dict[int, dict[Char, list[str]]]:
     """WCL snapshots every player's buffs as each pull starts: flask, food, rune, vantus."""
     out: dict[int, dict[Char, list[str]]] = defaultdict(dict)
@@ -569,6 +605,7 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
     potions = Counter({c: sum(n.values()) for c, n in potions_by_pull.items()})
     health, mana = _consumable_casts(report, players, settings.extra_health_items)
     mana_by_pull = _mana_potions(report, players, pull_ids)
+    gear_at_pull, specs = _gear_at_pull(report, players, pull_ids)
     if mana_by_pull is not None:  # the per-pull casts are the same count, limited to boss pulls
         mana = Counter({c: sum(n.values()) for c, n in mana_by_pull.items()})
 
@@ -614,4 +651,6 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
         power_infusion=_power_infusion(report, players, pull_ids),
         potions_by_pull=potions_by_pull,
         mana_by_pull=mana_by_pull or {},
+        gear_at_pull=gear_at_pull,
+        specs=specs,
     )

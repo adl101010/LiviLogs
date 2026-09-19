@@ -7,6 +7,7 @@ from collections import Counter
 
 from .awards import Line, consumable_rows, fmt_big, fmt_duration, fmt_rate, parse_colour, plural, times
 from .config import RecapSettings
+from .gear import describe, gear_rows
 from .recap import DPS, HEALER, TANK, Char, Night
 from .render import BLURPLE, Card
 
@@ -23,7 +24,8 @@ def my_night_card(night: Night, lines: list[Line], char: Char, settings: RecapSe
     facts.append(f"all {total} pulls" if played == total else f"{played} of {total} pulls")
 
     blocks = [b for b in (_performance(night, char, role), _deaths(night, char),
-                          _consumables(night, char, settings), _extras(night, char), _awards(lines, char)) if b]
+                          _consumables(night, char, settings), _gear(night, char, settings),
+                          _extras(night, char), _awards(lines, char)) if b]
     return Card(f"👤 Your night · {char.name}", BLURPLE, blocks, subtitle=" · ".join(facts),
                 button=("View log", url), pings=False)
 
@@ -121,6 +123,27 @@ def _potion_dots(night: Night, char: Char, healer: bool) -> str:
             n = combat.get(pull.id, 0) + mana.get(pull.id, 0)
             dots.append("⚫" if n == 0 else "🟢" if n == 1 else "🟣")
     return "".join(dots)
+
+
+def _gear(night: Night, char: Char, settings: RecapSettings) -> str | None:
+    row = next((r for r in gear_rows(night, settings) if r.char == char), None)
+    if row is None:
+        return None
+    gems = f"{row.gems} gems" if row.gems != 1 else "1 gem"
+    if row.ready:
+        return f"**🛠️ Gear** · ✅ fully enchanted · {gems}"
+    bits = []
+    if row.missing:
+        bits.append("⚠️ missing enchants: " + ", ".join(describe(row.missing, row)))
+    for check in row.unwrapped:
+        slot = describe([check], row)[0]
+        bits.append(f"⚠️ {'new ' if check.boss else ''}{slot} unenchanted for {plural(check.bare_pulls, 'pull')}")
+    if row.empty_sockets:
+        bits.append(f"⚠️ {plural(row.empty_sockets, 'empty socket')}")
+    late = [c for c in row.checks if c.state == "late"]
+    if late and not bits:
+        return f"**🛠️ Gear** · ✅ fully enchanted from pull {max(c.from_pull for c in late)} · {gems}"
+    return "**🛠️ Gear**\n" + " · ".join(bits)
 
 
 def _extras(night: Night, char: Char) -> str | None:

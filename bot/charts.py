@@ -1,4 +1,5 @@
-"""Pictures for the report: the parse grid, the consumables grid and a boss's progress by pull.
+"""Pictures for the report: the parse grid, the consumables grid, the gear check and a boss's
+progress by pull.
 
 Each chart is drawn with Pillow and returned as PNG bytes. The report lines they replace are kept,
 so a card Discord refuses (and the probe) still shows the same facts as text. A chart that fails to
@@ -12,6 +13,7 @@ from functools import lru_cache
 from PIL import Image, ImageDraw, ImageFont
 
 from .awards import ConsumableRow, consumable_rows
+from .gear import COLUMNS, gear_rows
 from .config import RecapSettings
 from .recap import DPS, HEALER, TANK, Boss, Night
 
@@ -298,6 +300,110 @@ def consumables_chart(night: Night, settings: RecapSettings) -> bytes | None:
     return canvas.png()
 
 
+# --- gear check --------------------------------------------------------------------------------
+
+GEAR_STYLES = {  # state -> (background, foreground)
+    "ok": (CELL, OK),
+    "missing": (WARN_BG, WARN),
+    "new": ((52, 44, 30), (230, 190, 110)),
+    "partly": ((52, 44, 30), (230, 190, 110)),
+    "late": ((42, 45, 60), (150, 170, 255)),
+}
+
+
+def _tick(canvas: Canvas, cx: float, cy: float, colour) -> None:
+    s = SCALE
+    canvas.draw.line([(cx - 5) * s, cy * s, (cx - 1.5) * s, (cy + 4) * s, (cx + 6) * s, (cy - 5) * s],
+                     fill=colour, width=2 * s, joint="curve")
+
+
+def _cross(canvas: Canvas, cx: float, cy: float, colour) -> None:
+    s = SCALE
+    for dy in (-4.5, 4.5):
+        canvas.draw.line([(cx - 4.5) * s, (cy - dy) * s, (cx + 4.5) * s, (cy + dy) * s], fill=colour, width=2 * s)
+
+
+def _gear_mark(canvas: Canvas, check, x: float, y: float, w: float, h: float, whole: bool) -> None:
+    """One slot: a tick, a cross, or a word for the in-between cases ("new: 11 pulls", "pull 4")."""
+    background, colour = GEAR_STYLES[check.state]
+    canvas.rect(x, y, w, h, background)
+    cx, cy = x + w / 2, y + h / 2
+    if check.state == "ok":
+        _tick(canvas, cx, cy, colour)
+    elif check.state == "missing":
+        if whole:
+            canvas.text(cx, cy, "none", 12, colour, bold=True, anchor="mm")
+        else:
+            _cross(canvas, cx, cy, colour)
+    elif check.state == "late":
+        canvas.text(cx, cy, f"pull {check.from_pull}" if whole else f"p{check.from_pull}", 11, colour, anchor="mm")
+    else:  # new or partly
+        text = f"new: {check.bare_pulls} pulls" if check.state == "new" else f"bare: {check.bare_pulls}"
+        canvas.text(cx, cy, text if whole else "new" if check.state == "new" else "bare", 11, colour, anchor="mm")
+
+
+def gear_chart(night: Night, settings: RecapSettings) -> bytes | None:
+    """One row per raider, a column per enchantable slot plus gems. Rings, and weapons for anyone
+    dual-wielding, are split in two so one missing ring is visible."""
+    rows = gear_rows(night, settings)
+    if not rows:
+        return None
+    columns = [label for label, _ in COLUMNS] + ["Gems"]
+    notes = ["Checked on every pull. \"new: 11 pulls\" = a new piece worn unenchanted for 11 pulls; "
+             "\"pull 4\" = enchanted from pull 4.",
+             "Rings, and weapons for dual-wielders, are split in two: first ring / main hand on the left.",
+             "Gems: sockets the log can see. Sockets added by crafting don't show up, so they can't be checked."]
+    name_w = max(text_width(r.char.name, 13) for r in rows) + 14
+    cell_w, cell_h, gap = 72, 24, 3
+    left, top, header_h = 16, 60, 26
+    groups = [(label, [r for r in rows if r.role == role]) for role, label in ROLE_ORDER]
+    groups = [(label, members) for label, members in groups if members]
+    width = max(left + name_w + len(columns) * (cell_w + gap) + 16, max(text_width(n, 11) for n in notes) + 32)
+    height = top + header_h + len(groups) * 22 + len(rows) * (cell_h + gap) + 44 + 17 * len(notes)
+
+    canvas = Canvas(width, height)
+    ready = sum(1 for r in rows if r.ready)
+    _header(canvas, "Gear check", f"enchants and gems, checked on every pull · {ready} of {len(rows)} fully ready")
+    x0 = left + name_w
+    for i, name in enumerate(columns):
+        canvas.text(x0 + i * (cell_w + gap) + cell_w / 2, top + header_h - 17, name, 10, MUTED, anchor="ma")
+
+    y = top + header_h
+    for label, members in groups:
+        canvas.text(left, y + 6, label, 10, FAINT, bold=True)
+        y += 22
+        for row in members:
+            canvas.text(left, y + cell_h / 2, row.char.name, 13, TEXT, anchor="lm")
+            for i, (_, checks) in enumerate(row.columns):
+                x = x0 + i * (cell_w + gap)
+                if not checks:
+                    canvas.rect(x, y, cell_w, cell_h, CELL)
+                    canvas.text(x + cell_w / 2, y + cell_h / 2, "–", 12, FAINT, anchor="mm")
+                elif len(checks) == 1:
+                    _gear_mark(canvas, checks[0], x, y, cell_w, cell_h, whole=True)
+                else:
+                    half = (cell_w - 2) / 2
+                    for j, check in enumerate(checks):
+                        _gear_mark(canvas, check, x + j * (half + 2), y, half, cell_h, whole=False)
+            x = x0 + len(row.columns) * (cell_w + gap)
+            if row.empty_sockets:
+                canvas.rect(x, y, cell_w, cell_h, WARN_BG)
+                canvas.text(x + cell_w / 2, y + cell_h / 2, f"{row.empty_sockets} empty", 12, WARN, bold=True,
+                            anchor="mm")
+            else:
+                canvas.rect(x, y, cell_w, cell_h, CELL)
+                canvas.text(x + cell_w / 2 - 5, y + cell_h / 2, str(row.gems), 12, OK, anchor="rm")
+                _tick(canvas, x + cell_w / 2 + 5, y + cell_h / 2, OK)
+            y += cell_h + gap
+
+    _legend(canvas, left, y + 14, [("enchanted", OK), ("missing", WARN),
+                                   ("new loot, not enchanted", GEAR_STYLES["new"][1]),
+                                   ("enchanted mid-raid", GEAR_STYLES["late"][1]), ("nothing to enchant", FAINT)])
+    for i, note in enumerate(notes):
+        canvas.text(left, y + 38 + i * 17, note, 11, MUTED)
+    return canvas.png()
+
+
 # --- progress ----------------------------------------------------------------------------------
 
 def progress_chart(night: Night, boss: Boss) -> bytes | None:
@@ -371,6 +477,8 @@ def draw_charts(night: Night, keys: set[str], settings: RecapSettings) -> dict[s
                 png = parse_chart(night)
             elif key == "consumables":
                 png = consumables_chart(night, settings)
+            elif key == "gear":
+                png = gear_chart(night, settings)
             elif key.startswith("progress:"):
                 png = progress_chart(night, night.bosses[int(key.split(":", 1)[1])])
             else:

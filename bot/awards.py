@@ -13,6 +13,7 @@ from dataclasses import dataclass, field
 from typing import Protocol
 
 from .config import RecapSettings
+from .gear import describe, gear_rows
 from .recap import (
     DPS, FLASK_PREFIXES, FOOD_PATTERN, HEALER, TANK, VANTUS_PREFIX, Boss, Char, Night, ParseLine,
 )
@@ -24,6 +25,7 @@ HIGHLIGHTS = "highlights"
 LOWLIGHTS = "lowlights"
 DEATHS = "deaths"
 CONSUMABLES = "consumables"
+GEAR = "gear"
 
 Part = str | Char
 
@@ -542,6 +544,55 @@ class Builder:
 
     # --- consumables ---------------------------------------------------------------------------
 
+    # --- gear check ----------------------------------------------------------------------------
+
+    def gear(self) -> None:
+        rows = gear_rows(self.night, self.settings)
+        if not rows:
+            return
+        ready = sum(1 for r in rows if r.ready)
+        # Stands in for the chart when there is one (the chart shows this raider by raider).
+        self.add(GEAR, [f"{ready} of {len(rows)} raiders fully enchanted"], cluster="chart", chart="gear")
+
+        missing = sorted((r for r in rows if r.missing), key=lambda r: (-len(r.missing), r.char.name.casefold()))
+        if missing:
+            parts: list[Part] = []
+            for i, r in enumerate(missing):
+                if i:
+                    parts.append(" · ")
+                parts += [r.char, " " + ", ".join(describe(r.missing, r))]
+            self.add(GEAR, parts, "no_enchant", [r.char for r in missing], title="🔧 Missing enchants",
+                     note="Not enchanted on any pull: helm, shoulders, chest, legs, boots, rings, weapons",
+                     cluster="calls", stacked=True)
+
+        unwrapped = [r for r in rows if r.unwrapped]
+        if unwrapped:
+            parts = []
+            for i, r in enumerate(unwrapped):
+                if i:
+                    parts.append(" · ")
+                bits = []
+                for check in r.unwrapped:
+                    slot = describe([check], r)[0]
+                    where = f"new {slot} from {check.boss}" if check.boss else slot
+                    bits.append(f"{where}, bare for {plural(check.bare_pulls, 'pull')}")
+                parts += [r.char, " " + "; ".join(bits)]
+            self.add(GEAR, parts, "unwrapped", [r.char for r in unwrapped], title="🎁 Unwrapped loot",
+                     note="Unenchanted for part of the night, usually new loot put on and never enchanted", cluster="calls", stacked=True)
+
+        sockets = sorted((r for r in rows if r.empty_sockets), key=lambda r: (-r.empty_sockets, r.char.name.casefold()))
+        if sockets:
+            parts = []
+            for i, r in enumerate(sockets):
+                if i:
+                    parts.append(" · ")
+                parts += [r.char, f" {plural(r.empty_sockets, 'empty socket')}"]
+            self.add(GEAR, parts, "empty_socket", [r.char for r in sockets], title="💎 Empty sockets",
+                     cluster="calls", stacked=True)
+
+        if ready == len(rows):
+            self.add(GEAR, ["✅ Everyone was fully enchanted and gemmed. Nice."], cluster="calls")
+
     def consumables(self) -> None:
         night = self.night
         if not night.retail or not night.auras_at_pull:
@@ -782,6 +833,7 @@ def build_lines(night: Night, settings: RecapSettings, history: History | None =
     builder.lowlights()
     builder.deaths()
     builder.consumables()
+    builder.gear()
     return builder.lines
 
 

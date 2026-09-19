@@ -13,7 +13,7 @@ from typing import Callable
 from zoneinfo import ZoneInfo
 
 from .awards import (
-    BOARD, CONSUMABLES, DEATHS, HEADLINE, HIGHLIGHTS, LOWLIGHTS, NIGHT, Line, fmt_duration, plural,
+    BOARD, CONSUMABLES, DEATHS, GEAR, HEADLINE, HIGHLIGHTS, LOWLIGHTS, NIGHT, Line, fmt_duration, plural,
 )
 from .recap import Char, Night
 
@@ -38,6 +38,7 @@ SECTIONS = [
     (LOWLIGHTS, "🤡 Lowlights", RED),
     (DEATHS, "💀 Deaths", GREY),
     (CONSUMABLES, "🧪 Consumables", TEAL),
+    (GEAR, "🛠️ Gear check", ORANGE),
 ]
 
 _MENTION = re.compile(r"<@(\d+)>")

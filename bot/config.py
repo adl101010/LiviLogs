@@ -85,6 +85,9 @@ class RecapSettings:
     combat_potions: tuple[str, ...] = ("Potion of Recklessness", "Light's Potential")
     tryhard_runes: tuple[str, ...] = ("Void-Touched",)
     extra_health_items: tuple[str, ...] = ()
+    # Item bonus ids that mean "this item has a socket" (Midnight's). WCL lists the gems in an item
+    # but not its sockets, so an item with one of these and no gem has an empty socket.
+    socket_bonus_ids: tuple[int, ...] = (13668, 13695, 13454, 12833, 13987)
 
     @classmethod
     def from_env(cls) -> "RecapSettings":
@@ -100,6 +103,7 @@ class RecapSettings:
             combat_potions=_names("COMBAT_POTIONS", cls.combat_potions),
             tryhard_runes=_names("TRYHARD_RUNES", cls.tryhard_runes),
             extra_health_items=_names("EXTRA_HEALTH_ITEMS", cls.extra_health_items),
+            socket_bonus_ids=tuple(int(x) for x in _names("SOCKET_BONUS_IDS", tuple(map(str, cls.socket_bonus_ids)))),
         )
 
 

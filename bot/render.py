@@ -242,7 +242,8 @@ def render_report(
     if thread:
         notes.append("🧵 Full report in the thread")
     if who.unlinked:
-        nudge = f"Not linked: {', '.join(c.name for c in who.unlinked)}. An admin can /link them so the bot can tag them."
+        nudge = (f"Not linked: {', '.join(c.name for c in who.unlinked)}. "
+                 "An admin can link them with /link-raid so the bot can tag them.")
         if thread:
             thread[-1].footer = nudge
         else:

@@ -12,6 +12,7 @@ import httpx
 from discord import app_commands, ui
 
 from .awards import Line, boss_results, build_lines, winners_by_key
+from . import linking
 from .charts import draw_charts
 from .config import Config
 from .mynight import my_night_card
@@ -136,7 +137,8 @@ class RecapBot(discord.Client):
         self.store = Store(config.db_path)
         self.wcl = WCLClient()
         self.tree = app_commands.CommandTree(self)
-        for command in (link_command, unlink_command, links_command, recap_command):
+        for command in (link_command, link_raid_command, link_member_menu, unlink_command, links_command,
+                        recap_command):
             self.tree.add_command(command)
         self._busy: set[ReportRef] = set()
         self._tasks: set[asyncio.Task] = set()  # keeps background checks from being garbage-collected
@@ -408,6 +410,13 @@ class RecapBot(discord.Client):
             return  # slash commands are the command tree's
         data = interaction.data or {}
         kind, _, rest = str(data.get("custom_id", "")).partition(":")
+        if kind in linking.KINDS:
+            try:
+                await linking.handle(self, interaction, kind, rest)
+            except Exception:
+                log.exception("Linking menu failed (%s)", kind)
+                await self._reply(interaction, "❌ Something went wrong. Nothing was changed; try again.")
+            return
         if kind not in (MY_NIGHT, MY_NIGHT_PICK):
             return
         host, _, code = rest.partition(":")
@@ -523,6 +532,56 @@ async def link_command(
                                             allowed_mentions=NO_PINGS)
 
 
+@app_commands.command(name="link-raid", description="Link everyone from a raid to their Discord members (admins)")
+@app_commands.describe(
+    link="A Warcraft Logs report. Leave empty for the last report the bot posted",
+    everyone="Also show raiders who are already linked, to review or change their links",
+)
+@app_commands.default_permissions(manage_guild=True)
+@app_commands.guild_only()
+async def link_raid_command(interaction: discord.Interaction, link: str | None = None, everyone: bool = False):
+    bot = _bot(interaction)
+    if link:
+        refs = find_report_links(link)
+        if not refs:
+            await interaction.response.send_message("That doesn't look like a Warcraft Logs report link.",
+                                                    ephemeral=True)
+            return
+        ref = refs[0]
+    else:
+        ref = bot.store.last_posted_report()
+        if ref is None:
+            await interaction.response.send_message("No report has been posted yet. Give me a report link.",
+                                                    ephemeral=True)
+            return
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    try:
+        chars = await linking.roster_for(bot, ref)
+    except ReportUnavailable:
+        await interaction.followup.send(PRIVATE_LOG.format(url=ref.url), ephemeral=True)
+        return
+    except (WCLError, httpx.HTTPError) as e:
+        await interaction.followup.send(f"❌ Couldn't get that log from Warcraft Logs: {e}", ephemeral=True)
+        return
+    view = linking.roster_view(chars, bot.store.user_for, ref, 0, everyone)
+    await interaction.followup.send(view=view, ephemeral=True, allowed_mentions=NO_PINGS)
+    view.stop()
+
+
+@app_commands.context_menu(name="Link characters")
+@app_commands.default_permissions(manage_guild=True)
+@app_commands.guild_only()
+async def link_member_menu(interaction: discord.Interaction, member: discord.Member):
+    """Right-click a member -> Apps -> Link characters."""
+    bot = _bot(interaction)
+    if member.bot:
+        await interaction.response.send_message("That's a bot. Pick a person.", ephemeral=True)
+        return
+    view = linking.member_view(member.id, bot.store)
+    await interaction.response.send_message(view=view, ephemeral=True, allowed_mentions=NO_PINGS)
+    view.stop()
+
+
 @app_commands.command(name="unlink", description="Remove a character link (admins)")
 @app_commands.describe(character="Character name, or Name-Realm", realm="Realm, if the name is linked on more than one")
 @app_commands.autocomplete(character=_linked_autocomplete)
@@ -560,7 +619,7 @@ async def links_command(interaction: discord.Interaction, member: discord.Member
             text = "No report has been posted yet."
         elif unlinked:
             text = ("Not linked from the last report: " + ", ".join(f"**{c.label}**" for c in unlinked)
-                    + "\n-# An admin can link them with /link.")
+                    + "\n-# An admin can link them with /link-raid.")
         else:
             text = "Everyone from the last report is linked."
         mine = bot.store.characters_of(interaction.user.id)

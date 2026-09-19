@@ -340,7 +340,7 @@ def test_thread_title_uses_the_guilds_timezone():
 
 def test_unlinked_nudge_goes_at_the_end_of_the_thread():
     r = full_text(links={n: i for i, n in enumerate(["Tanky", "Healz", "Pumper", "Greyson", "Dyer"], 1)})
-    assert r.thread[-1].footer == "Not linked: Middling. An admin can /link them so the bot can tag them."
+    assert r.thread[-1].footer == "Not linked: Middling. An admin can link them with /link-raid so the bot can tag them."
     assert "Not linked" not in card_text(r.headline)
 
 

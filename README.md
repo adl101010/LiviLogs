@@ -37,7 +37,7 @@ The cards use Discord's newer message layout ("components v2"), where @mentions 
 embeds). If Discord ever refuses a card, the bot sends the same content as ordinary messages
 instead, so a report is never lost.
 
-The thread has six sections, each its own card, posted only if it has something to say:
+The thread has seven sections, each its own card, posted only if it has something to say:
 
 | Section | What's in it |
 |---|---|
@@ -133,6 +133,8 @@ is only posted once.
 | Command | What it does |
 |---|---|
 | `/link <member> <characters> [realm]` | **Admins.** Link one or more characters to a member, comma-separated: `Bob, Bobalt, Bobdruid-Argent Dawn`. A person can have any number of characters (alts); whichever one shows up in a log tags them. Linking a character that belongs to someone else moves it, and says so. The box autocompletes from logs the bot has seen |
+| `/link-raid [link] [everyone]` | **Admins.** The quick way to link a whole raid. Shows the last posted report's unlinked raiders (or any report's, with `link`), each with a member picker: pick someone and they're linked. 10 per page. `everyone:True` also lists raiders who are already linked, with their member filled in, to review or fix. Clearing a picker unlinks |
+| Right-click a member → Apps → **Link characters** | **Admins.** Shows their linked characters, a menu to add any of the last 3 raids' raiders (unclaimed ones first), and one to remove. Good for someone new |
 | `/unlink <character> [realm]` | **Admins.** Remove a link |
 | `/links [member]` | Anyone. Show someone's characters; with no member, list who from the last report isn't linked |
 | `/recap <link>` | Post the report right now, without waiting |
@@ -140,10 +142,10 @@ is only posted once.
 
 Unlinked characters still appear in the report, in bold, with a nudge at the end of the thread.
 
-**Who counts as an admin:** Discord shows `/link` and `/unlink` only to members with the **Manage
-Server** permission, and refuses them from anyone else. To let officers link people without giving
-them Manage Server, go to Server Settings → Integrations → LiviLogs and allow their role on those two
-commands.
+**Who counts as an admin:** Discord shows `/link`, `/link-raid`, `/unlink` and the **Link
+characters** right-click command only to members with the **Manage Server** permission, and refuses
+them from anyone else. To let officers link people without giving them Manage Server, go to Server
+Settings → Integrations → LiviLogs and allow their role on those commands.
 
 ## Setup
 

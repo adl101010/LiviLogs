@@ -213,6 +213,30 @@ class Store:
                 (error, ref.host, ref.code),
             )
 
+    def report_characters(self, ref: ReportRef) -> list[Char] | None:
+        """Everyone in a posted report, or None if it was never posted."""
+        row = self._db.execute(
+            "SELECT characters FROM reports WHERE host = ? AND code = ? AND characters IS NOT NULL",
+            (ref.host, ref.code),
+        ).fetchone()
+        return [Char(n, r) for n, r in json.loads(row["characters"])] if row else None
+
+    def last_posted_report(self) -> ReportRef | None:
+        row = self._db.execute(
+            "SELECT host, code FROM reports WHERE status = 'posted' AND characters IS NOT NULL "
+            "ORDER BY posted_at DESC LIMIT 1"
+        ).fetchone()
+        return ReportRef(row["host"], row["code"]) if row else None
+
+    def recent_raiders(self, reports: int = 3) -> list[Char]:
+        """Everyone from the last few posted reports, alphabetical."""
+        rows = self._db.execute(
+            "SELECT characters FROM reports WHERE status = 'posted' AND characters IS NOT NULL "
+            "ORDER BY posted_at DESC LIMIT ?", (reports,)
+        ).fetchall()
+        chars = {Char(n, r).key: Char(n, r) for row in rows for n, r in json.loads(row["characters"])}
+        return sorted(chars.values(), key=lambda c: (c.name.casefold(), c.realm.casefold()))
+
     def last_recap_characters(self) -> list[Char]:
         row = self._db.execute(
             "SELECT characters FROM reports WHERE status = 'posted' AND characters IS NOT NULL "

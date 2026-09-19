@@ -116,6 +116,8 @@ class Config:
     timezone: ZoneInfo  # only for the date in thread titles; message text uses Discord timestamps
     thread_ping_everyone: bool
     recap: RecapSettings
+    charts: bool = True  # parse, consumables and progress pictures in the thread
+    my_night: bool = True  # the "My night" button on the headline
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -131,6 +133,8 @@ class Config:
             timezone=_zone("TIMEZONE"),
             thread_ping_everyone=_bool("THREAD_PING_EVERYONE", True),
             recap=RecapSettings.from_env(),
+            charts=_bool("CHARTS", True),
+            my_night=_bool("MY_NIGHT", True),
         )
 
 

@@ -21,8 +21,15 @@ button:
 ┃ 🗑️ Grey - @Totemtoss healing 20.3
 ┃ 💀 Floor inspector - @Facepull 11 deaths
 ┃ 🧵 Full report in the thread
-┃ [ View log on Warcraft Logs ↗ ]
+┃ [ 👤 My night ]  [ View log on Warcraft Logs ↗ ]
 ```
+
+**👤 My night** shows whoever presses it a card only they can see: their parse on every boss, their
+deaths and what killed them, their consumables (with ⚠️ on anything the report called out), their
+interrupts, dispels and damage, and which callouts they got. It uses the characters an admin has
+linked to them; anyone not linked yet picks their character from a menu. The last 8 nights are kept
+in memory, so the button answers instantly; after a restart, or on an older report, the bot fetches
+the log again first (a few seconds).
 
 The cards use Discord's newer message layout ("components v2"), where @mentions still ping (unlike
 embeds). If Discord ever refuses a card, the bot sends the same content as ordinary messages
@@ -38,6 +45,21 @@ The thread has six sections, each its own card, posted only if it has something 
 | 🤡 Lowlights | 🚽 Parse of shame, 🎢 Rollercoaster, ⚔️ Battle healer, 🧽 Damage sponge, 🛡️ Outdamaged by a tank |
 | 💀 Deaths | 💀 Floor inspector, 🐤 Canary, 🎁 Couldn't wait for loot, 🎯 Nemesis, 🧲 Brez magnet, 👻 Ghost (most time spent dead, 3 minutes or more), ⏱️ Speedrunner |
 | 🧪 Consumables | 🔮 Tryhards (Void-Touched rune), 🍺 Potion seller, 🫗 Mana chugger, 🍪 Cookie monster, 🧪 Potion hoarders, 🪦 Died with a healthstone in the bag, ⚗️ No flask, 🍗 Forgot to eat, 📜 No vantus. Retail only |
+
+**Charts.** Three parts of the thread are pictures the bot draws:
+
+- **Parses:** a grid of everyone's parse on every kill, in WCL's colours, with the night's average
+  at the end. Replaces the leaderboard text.
+- **Consumables:** one row per raider (flask, food, combat potion, healthstones, vantus, rune).
+  Yellow marks what would have been called out, by the same rules as the callouts. Replaces the
+  tryhard, hoarder, healthstone, flask, food and vantus callouts; the potion seller, mana chugger
+  and cookie monster shoutouts stay as text.
+- **Progress:** a boss's health at the end of each pull, coloured by phase, with the best pull
+  marked. Replaces the `▇▅▅▄` bar strip, for bosses pulled 3 or more times.
+
+A picture can't ping anyone, so a line of @mentions goes under the parse chart instead (unless
+`THREAD_PING_EVERYONE=false`). If Discord refuses a card, the fallback text has the original lines.
+Set `CHARTS=false` to go back to text everywhere.
 
 How the numbers work:
 
@@ -170,6 +192,8 @@ with the names replaced.
 | `bot/recap.py` | Raw WCL JSON → facts about the night. No network; all JSON parsing lives here |
 | `bot/awards.py` | The night → headline, callouts and sections. Each callout decides if it has something to say |
 | `bot/render.py` | Lines → cards: headline card, thread title, one card per section; plain-text version for fallback and the probe |
+| `bot/charts.py` | The parse, consumables and progress pictures (Pillow) |
+| `bot/mynight.py` | The private "My night" card |
 | `bot/watch.py` | "Is this log finished?" |
 | `bot/store.py` | SQLite: links, seen characters, report status, history |
 | `bot/main.py` | Discord: channel watcher, slash commands, cards (components v2), threads, pings |

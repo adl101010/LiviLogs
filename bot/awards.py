@@ -38,6 +38,7 @@ class Line:
     note: str | None = None  # small print under the title, e.g. "Void-Touched rune"
     cluster: str = ""  # related lines share a block; the card puts a divider between blocks
     stacked: bool | None = None  # body under the title rather than beside it; None = decide by content
+    chart: str | None = None  # the chart that shows the same thing ("parses", "consumables", "progress:2")
 
     @property
     def is_stacked(self) -> bool:
@@ -165,7 +166,7 @@ class Builder:
 
     def add(self, section: str, parts: list[Part], key: str | None = None,
             winners: list[Char] | None = None, *, title: str | None = None, note: str | None = None,
-            cluster: str = "", stacked: bool | None = None) -> None:
+            cluster: str = "", stacked: bool | None = None, chart: str | None = None) -> None:
         # "(10 deaths) (2 raids running)" reads better as "(10 deaths, 2 raids running)".
         merged: list[Part] = []
         for part in parts:
@@ -174,7 +175,7 @@ class Builder:
                 merged[-1] = f"{merged[-1][:-1]}, {match.group(1)})"
             elif part != "":
                 merged.append(part)
-        self.lines.append(Line(section, merged, key, winners or [], title, note, cluster, stacked))
+        self.lines.append(Line(section, merged, key, winners or [], title, note, cluster, stacked, chart))
 
     def running(self, key: str, char: Char) -> str:
         streak = self.history.streak(key, char, self.night.start_ms)
@@ -276,7 +277,7 @@ class Builder:
             self.add(NIGHT, [" · ".join(entries)], cluster="bosses")
             self.add(NIGHT, [f"-# {first_pull}{time}"], cluster="bosses")
 
-        for boss in night.bosses:
+        for index, boss in enumerate(night.bosses):
             facts = []
             if len(boss.pulls) >= 5 and all(p.boss_pct is not None for p in boss.pulls):
                 facts.append("`" + "".join(PHASE_BARS[min(7, max(0, math.ceil(p.boss_pct / 12.5) - 1))]
@@ -291,7 +292,7 @@ class Builder:
             if facts and (not boss.killed or len(boss.pulls) >= 5):
                 bar_note = "Boss health by pull: the shorter the bar, the closer to a kill" if facts[0].startswith("`") else None
                 self.add(NIGHT, [" · ".join(facts)], title=f"📉 {boss.name} progress", note=bar_note,
-                         cluster="progress", stacked=True)
+                         cluster="progress", stacked=True, chart=progress_chart_key(boss, index))
 
         close = [(b, b.best_wipe) for b in night.bosses if b.killed and b.best_wipe]
         close = [(b, w) for b, w in close if w.boss_pct is not None and w.boss_pct <= 10]
@@ -349,7 +350,8 @@ class Builder:
                     else:
                         parts += ["\n" if i == 1 else " · ", r.char, f" {fmt_rate(r.per_second)}{missed}"]
             if entries:
-                self.add(BOARD, parts, title=f"{ROLE_EMOJI[role]} {ROLE_NAMES[role]}", cluster=role, stacked=True)
+                self.add(BOARD, parts, title=f"{ROLE_EMOJI[role]} {ROLE_NAMES[role]}", cluster=role, stacked=True,
+                         chart="parses" if night.has_parses else None)
 
     # --- highlights ----------------------------------------------------------------------------
 
@@ -572,7 +574,7 @@ class Builder:
                         parts.append(" · ")
                     parts += [c, " every pull" if used[c] == snapshots[c] else f" {used[c]} of {snapshots[c]}"]
                 self.add(CONSUMABLES, parts, "tryhard", tryhards, title="🔮 Tryhards",
-                         note=f"{' / '.join(sorted(runes))} rune", cluster="shoutouts")
+                         note=f"{' / '.join(sorted(runes))} rune", cluster="shoutouts", chart="consumables")
 
         chars, n = leaders(night.potions, 5, max_names=2)
         if chars:
@@ -627,7 +629,7 @@ class Builder:
                     numbered += 1
             self.add(CONSUMABLES, parts, "hoarder", [h[1] for h in hoarders], title="🧪 Potion hoarders",
                      note="No combat potion on most of their pulls (healers: no potion of any kind)",
-                     cluster="shame")
+                     cluster="shame", chart="consumables")
 
         # Died with a healthstone in the bag: not one healthstone or health potion all night, and
         # died at least twice (deaths before the wipe call, the same count as the floor inspector).
@@ -642,7 +644,7 @@ class Builder:
                         parts.append(" · ")
                     parts += [c, (" died " if i == 0 else " ") + times(counted[c])]
                 self.add(CONSUMABLES, parts, "healthstone_bag", bag, title="🪦 Died with a healthstone in the bag",
-                         note="Not one healthstone or health potion all night", cluster="shame")
+                         note="Not one healthstone or health potion all night", cluster="shame", chart="consumables")
 
         for key, title, check in (
             ("no_flask", "⚗️ No flask", lambda a: a.startswith(FLASK_PREFIXES)),
@@ -656,7 +658,7 @@ class Builder:
                     if i:
                         parts.append(" · ")
                     parts += [c, " " + of(gaps[c], snapshots[c], first=i == 0)]
-                self.add(CONSUMABLES, parts, key, offenders, title=title, cluster="prep")
+                self.add(CONSUMABLES, parts, key, offenders, title=title, cluster="prep", chart="consumables")
 
         # No vantus: only pulls where at least half the raid had one, so skipping it on farm
         # bosses is never called out.
@@ -687,7 +689,80 @@ class Builder:
                 comma = "," if len(chars) > 1 else ""
                 parts += [*joined(chars), f"{comma} all {total} pulls" if n == total else f"{comma} " + of(n, total, first=i == 0)]
             self.add(CONSUMABLES, parts, "no_vantus", skipped, title="📜 No vantus",
-                     note="On pulls where most of the raid had one", cluster="prep")
+                     note="On pulls where most of the raid had one", cluster="prep", chart="consumables")
+
+
+def progress_chart_key(boss: Boss, index: int) -> str | None:
+    """Bosses pulled 3+ times with the boss's health known on every pull get a chart."""
+    if len(boss.pulls) >= 3 and all(p.boss_pct is not None for p in boss.pulls):
+        return f"progress:{index}"
+    return None
+
+
+@dataclass
+class ConsumableRow:
+    """One raider's consumables for the night, and which of them the report would call out. The
+    rules are the Consumables callouts' rules, so the grid and the text never disagree."""
+    char: Char
+    role: str
+    snapshots: int  # pulls with a buff snapshot
+    pulls: int  # boss pulls they were in
+    flask: int
+    food: int
+    rune: int
+    potion_pulls: int
+    mana_potions: int
+    health_items: int
+    vantus: int  # of vantus_pulls
+    vantus_pulls: int  # pulls where most of the raid had a vantus rune
+    flags: set[str] = field(default_factory=set)  # tryhard, hoarder, healthstone_bag, no_flask, no_food, no_vantus
+
+
+def consumable_rows(night: Night, settings: RecapSettings) -> list[ConsumableRow]:
+    if not night.retail or not night.auras_at_pull:
+        return []
+    runes = set(settings.tryhard_runes)
+    rows: dict[Char, ConsumableRow] = {}
+    for char in night.roster:
+        rows[char] = ConsumableRow(char, night.roles.get(char, DPS), 0, len(night.pulls_in.get(char, ())),
+                                   0, 0, 0, len(night.potion_pulls.get(char, ())), night.mana_potions.get(char, 0),
+                                   night.health_items.get(char, 0), 0, 0)
+    for players in night.auras_at_pull.values():
+        has_vantus = {c for c, auras in players.items() if any(a.startswith(VANTUS_PREFIX) for a in auras)}
+        vantus_pull = bool(players) and len(has_vantus) * 2 >= len(players)
+        for char, auras in players.items():
+            row = rows.get(char)
+            if row is None:
+                continue
+            row.snapshots += 1
+            row.flask += any(a.startswith(FLASK_PREFIXES) for a in auras)
+            row.food += any(FOOD_PATTERN in a for a in auras)
+            row.rune += any(a in runes for a in auras)
+            if vantus_pull:
+                row.vantus_pulls += 1
+                row.vantus += char in has_vantus
+    counted = Counter(d.char for ds in night.counted.values() for d in ds)
+    for row in rows.values():
+        if runes and row.rune and row.rune * 2 >= row.snapshots:
+            row.flags.add("tryhard")
+        if row.pulls >= 3:
+            if row.role == HEALER:
+                if not row.potion_pulls and not row.mana_potions:
+                    row.flags.add("hoarder")
+            elif (row.pulls - row.potion_pulls) * 2 > row.pulls:
+                row.flags.add("hoarder")
+        if night.casts_known and counted[row.char] >= 2 and not row.health_items:
+            row.flags.add("healthstone_bag")
+        if row.snapshots - row.flask >= 2:
+            row.flags.add("no_flask")
+        if row.snapshots - row.food >= 2:
+            row.flags.add("no_food")
+        missed = row.vantus_pulls - row.vantus
+        if missed and missed * 2 >= row.vantus_pulls:
+            row.flags.add("no_vantus")
+    order = {TANK: 0, HEALER: 1, DPS: 2}
+    return sorted((r for r in rows.values() if r.snapshots),
+                  key=lambda r: (order.get(r.role, 3), r.char.name.casefold()))
 
 
 def build_lines(night: Night, settings: RecapSettings, history: History | None = None) -> list[Line]:

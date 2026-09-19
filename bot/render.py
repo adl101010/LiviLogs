@@ -1,8 +1,8 @@
 """Report lines -> cards: a headline card for #logs and one card per section in the thread under it.
 
-A card is plain data (title, blocks of markdown, colour, optional thumbnail and link button). The
-Discord side turns it into a components-v2 container; card_text() gives the same content as plain
-markdown for the probe and as a fallback. Mentions inside a container's text still ping (unlike
+A card is plain data (title, blocks of markdown or charts, colour, optional thumbnail and buttons).
+The Discord side turns it into a components-v2 container; card_text() gives the same content as plain
+markdown for the probe and as a fallback, with each chart replaced by the lines it stands for. Mentions inside a container's text still ping (unlike
 embeds), so the ping rules are the same as for ordinary messages.
 """
 
@@ -44,13 +44,25 @@ _MENTION = re.compile(r"<@(\d+)>")
 
 
 @dataclass
+class Chart:
+    """A picture in a card, and the text it replaces (used wherever the picture can't be shown)."""
+    filename: str
+    png: bytes
+    text: str
+
+
+Block = str | Chart
+
+
+@dataclass
 class Card:
     title: str
     accent: int
-    blocks: list[str]  # markdown; the card draws a divider between blocks
+    blocks: list[Block]  # markdown or a chart; the card draws a divider between blocks
     subtitle: str | None = None
     thumbnail: str | None = None  # image URL shown beside the title
     button: tuple[str, str] | None = None  # (label, url) link button at the bottom
+    actions: list[tuple[str, str]] = field(default_factory=list)  # (label, custom_id) buttons for the bot
     footer: str | None = None  # small print at the bottom
     pings: bool = True  # False: mentions show as names but notify nobody
 
@@ -91,9 +103,43 @@ def line_text(line: Line, who: _Names) -> str:
     return f"**{line.title}** - {body}"
 
 
-def _blocks(lines: list[Line], who: _Names) -> list[str]:
+def _blocks(lines: list[Line], who: _Names, charts: dict[str, bytes] | None = None) -> list[Block]:
     """One block per cluster, in the order clusters first appear; stacked callouts get a blank line
-    between them so each reads as its own item."""
+    between them so each reads as its own item.
+
+    Lines a chart covers become that chart, placed before the first block that followed them (or
+    at the end). Their text goes with the chart for the fallback.
+    """
+    charts = charts or {}
+    covered: dict[str, list[Line]] = {}
+    follows: dict[str, Line | None] = {}
+    rest: list[Line] = []
+    for line in lines:
+        if line.chart in charts:
+            if line.chart not in covered:
+                covered[line.chart] = []
+                follows[line.chart] = None
+            covered[line.chart].append(line)
+        else:
+            rest.append(line)
+            for key, after in follows.items():
+                if after is None:
+                    follows[key] = line
+    clusters = list(dict.fromkeys(line.cluster for line in rest))  # _text_blocks makes one block each
+    blocks: list[Block] = list(_text_blocks(rest, who))
+    placed: list[tuple[int, Chart]] = []
+    for key, chart_lines in covered.items():
+        text = "\n\n".join(_text_blocks(chart_lines, who))
+        after = follows[key]
+        placed.append((clusters.index(after.cluster) if after else len(clusters),
+                       Chart(key.replace(":", "-") + ".png", charts[key], text)))
+    # From the back, so indexes stay right; two charts at one spot keep their order.
+    for index, chart in sorted(reversed(placed), key=lambda ic: ic[0], reverse=True):
+        blocks.insert(index, chart)
+    return blocks
+
+
+def _text_blocks(lines: list[Line], who: _Names) -> list[str]:
     order: list[str] = []
     grouped: dict[str, list[Line]] = {}
     for line in lines:
@@ -146,6 +192,8 @@ def render_report(
     tz: ZoneInfo = ZoneInfo("UTC"),
     thread_ping_everyone: bool = True,
     thumbnail: str | None = None,
+    charts: dict[str, bytes] | None = None,
+    actions: list[tuple[str, str]] | None = None,
 ) -> Rendered:
     who = _Names(user_for)
     prog = not night.kills
@@ -180,7 +228,14 @@ def render_report(
         if section == BOARD:
             title = "📊 Parses" if night.has_parses else "📊 Throughput"
             subtitle = None if night.has_parses else "Raw numbers: wipes don't get parses"
-        thread.append(Card(title, accent, _blocks(section_lines, who), subtitle=subtitle,
+        blocks = _blocks(section_lines, who, charts)
+        if section == BOARD and thread_ping_everyone and any(isinstance(b, Chart) for b in blocks):
+            # A picture can't ping anyone, so the raid gets tagged in a line under it instead.
+            chars = [p for line in section_lines for p in line.parts if isinstance(p, Char)]
+            tags = [f"<@{uid}>" for uid in dict.fromkeys(user_for(c) for c in chars) if uid]
+            if tags:
+                blocks.append("-# " + " ".join(tags))
+        thread.append(Card(title, accent, blocks, subtitle=subtitle,
                            pings=thread_ping_everyone or section != BOARD))
 
     if thread:
@@ -200,6 +255,7 @@ def render_report(
         thumbnail=thumbnail,
         button=("View log on Warcraft Logs", url),
         footer=" · ".join(notes) or None,
+        actions=actions or [],
     )
     thread_title = f"{kind} · {_local_date(night, tz)} · {_subject(night)}" if night.start_ms else kind
     return Rendered(headline, thread_title[:THREAD_NAME_LIMIT], [c for card in thread for c in split_card(card)],
@@ -207,11 +263,12 @@ def render_report(
 
 
 def card_text(card: Card) -> str:
-    """The card as plain markdown: what the probe prints, and the fallback if a card is refused."""
+    """The card as plain markdown: what the probe prints, and the fallback if a card is refused.
+    Charts are replaced by the lines they stand for."""
     parts = [f"### {card.title}"]
     if card.subtitle:
         parts[0] += f"\n-# {card.subtitle}"
-    parts += card.blocks
+    parts += [b.text if isinstance(b, Chart) else b for b in card.blocks]
     if card.footer:
         parts.append(f"-# {card.footer}")
     if card.button:
@@ -219,19 +276,29 @@ def card_text(card: Card) -> str:
     return "\n\n".join(parts)
 
 
+def visible_text(card: Card) -> str:
+    """What a card actually shows (a chart's stand-in text isn't), for working out who it pings."""
+    parts = [card.title, card.subtitle or "", card.footer or ""]
+    return "\n".join(parts + [b for b in card.blocks if isinstance(b, str)])
+
+
 def split_card(card: Card, limit: int = TEXT_LIMIT, max_blocks: int = MAX_BLOCKS) -> list[Card]:
     """Keep each card inside one Discord message's limits; an overflowing card continues in a
     second card with the same colour. A single block that is itself too long is split on lines."""
-    blocks: list[str] = []
+    blocks: list[Block] = []
     for block in card.blocks:
-        blocks += _split_block(block, limit - 300)
+        blocks += [block] if isinstance(block, Chart) else _split_block(block, limit - 300)
     cards: list[Card] = []
-    current: list[str] = []
+    current: list[Block] = []
     fixed = len(card.title) + len(card.subtitle or "") + len(card.footer or "") + 200
+
+    def size_of(block: Block) -> int:
+        return 0 if isinstance(block, Chart) else len(block)
+
     for block in blocks:
-        size = fixed + sum(len(b) for b in current) + len(block)
+        size = fixed + sum(size_of(b) for b in current) + size_of(block)
         if current and (size > limit or len(current) >= max_blocks):
-            cards.append(replace(card, blocks=current, footer=None, button=None))
+            cards.append(replace(card, blocks=current, footer=None, button=None, actions=[]))
             current = []
         current.append(block)
     cards.append(replace(card, blocks=current))

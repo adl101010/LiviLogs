@@ -1,8 +1,10 @@
 """The Discord side: watches the logs channel, runs slash commands, posts reports as cards."""
 
 import asyncio
+import io
 import logging
 import time
+from collections import OrderedDict
 from dataclasses import dataclass
 
 import discord
@@ -10,9 +12,13 @@ import httpx
 from discord import app_commands, ui
 
 from .awards import Line, boss_results, build_lines, winners_by_key
+from .charts import draw_charts
 from .config import Config
+from .mynight import my_night_card
 from .recap import Char, Night, analyze, norm_realm
-from .render import Card, Rendered, card_text, featured_boss, mentioned_ids, render_report, split_message
+from .render import (
+    Card, Chart, Rendered, card_text, featured_boss, mentioned_ids, render_report, split_message, visible_text,
+)
 from .store import PendingReport, Store
 from .watch import check_ready
 from .wcl import ReportRef, ReportUnavailable, WCLClient, WCLError, find_report_links
@@ -21,6 +27,12 @@ log = logging.getLogger("livilogs")
 
 NO_PINGS = discord.AllowedMentions.none()
 BOSS_ICON = "https://assets.rpglogs.com/img/warcraft/bosses/{}-icon.jpg"
+
+# Buttons and menus the bot answers itself. The report is in the id, so they keep working after a
+# restart: "mynight:www.warcraftlogs.com:AbCd1234".
+MY_NIGHT = "mynight"
+MY_NIGHT_PICK = "mynight-pick"
+NIGHTS_KEPT = 8  # recent nights kept in memory for the button; older ones are fetched again
 
 
 def pings_for(user_ids) -> discord.AllowedMentions:
@@ -74,13 +86,38 @@ def card_view(card: Card) -> ui.LayoutView:
         else ui.TextDisplay(header)
     ]
     for block in card.blocks:
-        items += [ui.Separator(), ui.TextDisplay(block)]
+        if isinstance(block, Chart):
+            items += [ui.Separator(), ui.MediaGallery(discord.MediaGalleryItem(f"attachment://{block.filename}"))]
+        else:
+            items += [ui.Separator(), ui.TextDisplay(block)]
     if card.footer:
         items.append(ui.TextDisplay(f"-# {card.footer}"))
+    buttons: list[ui.Item] = [ui.Button(style=discord.ButtonStyle.primary, label=label, custom_id=custom_id)
+                              for label, custom_id in card.actions]
     if card.button:
-        items.append(ui.ActionRow(ui.Button(style=discord.ButtonStyle.link, label=card.button[0], url=card.button[1])))
+        buttons.append(ui.Button(style=discord.ButtonStyle.link, label=card.button[0], url=card.button[1]))
+    if buttons:
+        items.append(ui.ActionRow(*buttons))
     view.add_item(ui.Container(*items, accent_colour=card.accent))
     return view
+
+
+def character_picker(night: Night, ref: ReportRef) -> ui.View:
+    """Menus of everyone in the raid, for someone who isn't linked yet (25 names per menu)."""
+    view = ui.View(timeout=None)
+    roster = sorted(night.roster, key=lambda c: c.name.casefold())
+    for i in range(0, min(len(roster), 100), 25):
+        chunk = roster[i:i + 25]
+        options = [discord.SelectOption(label=c.name, value=c.label, description=c.realm or None) for c in chunk]
+        placeholder = "Pick your character" if len(roster) <= 25 else f"{chunk[0].name} – {chunk[-1].name}"
+        view.add_item(ui.Select(custom_id=f"{MY_NIGHT_PICK}:{ref.host}:{ref.code}:{i // 25}",
+                                placeholder=placeholder, options=options))
+    return view
+
+
+def card_files(card: Card) -> list[discord.File]:
+    """The chart pictures a card's view points at (attachment://...)."""
+    return [discord.File(io.BytesIO(b.png), filename=b.filename) for b in card.blocks if isinstance(b, Chart)]
 
 
 @dataclass
@@ -104,6 +141,8 @@ class RecapBot(discord.Client):
         self._busy: set[ReportRef] = set()
         self._tasks: set[asyncio.Task] = set()  # keeps background checks from being garbage-collected
         self._icons: dict[int, bool] = {}  # boss id -> WCL has a picture for it
+        self._nights: OrderedDict[ReportRef, tuple[Night, list[Line]]] = OrderedDict()  # for My night
+        self._night_locks: dict[ReportRef, asyncio.Lock] = {}
 
     async def setup_hook(self) -> None:
         if self.config.guild_id:
@@ -235,11 +274,40 @@ class RecapBot(discord.Client):
         night = analyze(report, self.config.recap)
         lines = build_lines(night, self.config.recap, self.store)  # the store remembers past nights
         self.store.remember(night.roster)
+        self.keep_night(ref, night, lines)
+        charts = {}
+        if self.config.charts:
+            keys = {line.chart for line in lines if line.chart}
+            charts = await asyncio.to_thread(draw_charts, night, keys, self.config.recap)
+        actions = [("👤 My night", f"{MY_NIGHT}:{ref.host}:{ref.code}")] if self.config.my_night else []
         rendered = render_report(
             night, lines, ref.url, self.store.user_for, self.config.timezone, self.config.thread_ping_everyone,
-            thumbnail=await self.boss_picture(night),
+            thumbnail=await self.boss_picture(night), charts=charts, actions=actions,
         )
         return Built(rendered, night, lines)
+
+    def keep_night(self, ref: ReportRef, night: Night, lines: list[Line]) -> None:
+        self._nights[ref] = (night, lines)
+        self._nights.move_to_end(ref)
+        while len(self._nights) > NIGHTS_KEPT:
+            self._nights.popitem(last=False)
+
+    async def night_for(self, ref: ReportRef) -> tuple[Night, list[Line]]:
+        """A recent night from memory, or fetched again (after a restart, or an old report). One
+        fetch per report even if the whole raid presses the button at once."""
+        if ref in self._nights:
+            self._nights.move_to_end(ref)
+            return self._nights[ref]
+        lock = self._night_locks.setdefault(ref, asyncio.Lock())
+        async with lock:
+            kept = self._nights.get(ref)
+            if kept is None:
+                report = await self.wcl.report_full(ref, self.config.recap)
+                night = analyze(report, self.config.recap)
+                kept = (night, build_lines(night, self.config.recap, self.store))
+                self.keep_night(ref, *kept)
+        self._night_locks.pop(ref, None)
+        return kept
 
     async def boss_picture(self, night: Night) -> str | None:
         """WCL's picture of the night's featured boss, if WCL has one (checked once per boss, so a
@@ -268,7 +336,7 @@ class RecapBot(discord.Client):
             discord.MessageReference(message_id=reply_to, channel_id=channel_id, fail_if_not_exists=False)
             if reply_to else None
         )
-        headline = await self.send_card(channel, rendered.headline, mentioned_ids(card_text(rendered.headline)),
+        headline = await self.send_card(channel, rendered.headline, mentioned_ids(visible_text(rendered.headline)),
                                         reference)
         if not rendered.thread:
             return
@@ -281,13 +349,19 @@ class RecapBot(discord.Client):
                 log.warning("Couldn't open a thread (%s); posting the report in the channel instead", e)
         pinged: set[int] = set()
         for card in rendered.thread:
-            ids = [i for i in mentioned_ids(card_text(card)) if i not in pinged] if card.pings else []
+            # Only people the card visibly names: a chart's stand-in text isn't shown, so no pings from it.
+            ids = [i for i in mentioned_ids(visible_text(card)) if i not in pinged] if card.pings else []
             await self.send_card(target, card, ids)
             pinged.update(ids)
 
     async def send_card(self, target, card: Card, ping_ids: list[int], reference=None) -> discord.Message:
         try:
-            return await target.send(view=card_view(card), reference=reference, allowed_mentions=pings_for(ping_ids))
+            view = card_view(card)
+            files = card_files(card)
+            extra = {"files": files} if files else {}
+            sent = await target.send(view=view, reference=reference, allowed_mentions=pings_for(ping_ids), **extra)
+            view.stop()  # the bot answers its buttons in on_interaction; nothing to keep in memory
+            return sent
         except discord.HTTPException as e:
             if e.status != 400:
                 raise
@@ -326,6 +400,64 @@ class RecapBot(discord.Client):
             channel = self.get_channel(pending.channel_id)
             if channel:
                 await self._react(channel, pending.source_message_id, add=emoji, remove="👀")
+
+    # --- My night ------------------------------------------------------------------------------
+
+    async def on_interaction(self, interaction: discord.Interaction) -> None:
+        if interaction.type != discord.InteractionType.component:
+            return  # slash commands are the command tree's
+        data = interaction.data or {}
+        kind, _, rest = str(data.get("custom_id", "")).partition(":")
+        if kind not in (MY_NIGHT, MY_NIGHT_PICK):
+            return
+        host, _, code = rest.partition(":")
+        code = code.partition(":")[0]  # pickers add ":<n>" so each menu's id is unique
+        # Rebuilt through the link parser, so the id can only ever name a warcraftlogs.com report.
+        refs = find_report_links(f"https://{host}/reports/{code}")
+        if not refs:
+            await interaction.response.send_message("That button is broken. Sorry!", ephemeral=True)
+            return
+        try:
+            await self.show_my_night(interaction, refs[0], kind == MY_NIGHT_PICK)
+        except Exception:
+            log.exception("My night failed for %s", refs[0].url)
+            await self._reply(interaction, "❌ Something went wrong. Try again in a minute.")
+
+    async def show_my_night(self, interaction: discord.Interaction, ref: ReportRef, picked: bool) -> None:
+        if ref not in self._nights:  # fetching takes a few seconds; Discord wants an answer within 3
+            await interaction.response.defer(ephemeral=True, thinking=True)
+        try:
+            night, lines = await self.night_for(ref)
+        except ReportUnavailable:
+            await self._reply(interaction, PRIVATE_LOG.format(url=ref.url))
+            return
+        except (WCLError, httpx.HTTPError) as e:
+            await self._reply(interaction, f"❌ Couldn't get that log from Warcraft Logs: {e}")
+            return
+
+        if picked:
+            wanted = set((interaction.data or {}).get("values") or [])
+            chars = [c for c in night.roster if c.label in wanted]
+        else:
+            chars = [c for c in night.roster if self.store.user_for(c) == interaction.user.id]
+        if not chars:
+            await self._reply(interaction, "You aren't linked to anyone in this raid. Which one is you?\n"
+                              "-# An admin can /link your characters so this is one click next time.",
+                              view=character_picker(night, ref))
+            return
+        for char in chars[:3]:  # someone who swapped to an alt mid-raid gets one card each
+            card = my_night_card(night, lines, char, self.config.recap, ref.url)
+            await self._reply(interaction, view=card_view(card))
+
+    async def _reply(self, interaction: discord.Interaction, content: str | None = None, view=None) -> None:
+        """An answer only the person who pressed the button sees."""
+        extra = {"view": view} if view is not None else {}
+        if interaction.response.is_done():
+            await interaction.followup.send(content, ephemeral=True, allowed_mentions=NO_PINGS, **extra)
+        else:
+            await interaction.response.send_message(content, ephemeral=True, allowed_mentions=NO_PINGS, **extra)
+        if view is not None:
+            view.stop()  # answered in on_interaction, not by discord.py's view store
 
 
 def _bot(interaction: discord.Interaction) -> RecapBot:

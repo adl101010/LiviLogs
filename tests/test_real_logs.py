@@ -48,7 +48,7 @@ def test_guild_kill_night():
     assert "72M damage (3× the next healer) with a 20.3 healing parse" in text
     assert "**🎁 Couldn't wait for loot**" in text and "3 deaths each on kills" in text
     assert "Nemesis" not in text  # a three-way tie at 3: nobody stands out
-    assert "**👻 Ghost** - " in text and " · spent 9m dead" in text
+    assert "**👻 Ghost** - " in text and " · spent 8m 47s dead" in text
     assert "PI's favorite" not in text  # no Power Infusion given to anyone else that night
 
     consumables = card_text(next(c for c in r.thread if c.title.startswith("🧪")))
@@ -76,7 +76,7 @@ def test_guild_prog_night():
     assert "38 interrupts (next best: 21)" in text
     assert "9 battle rezzes" in text
     assert "died to Necrotic Vapors 6 times" in text
-    assert " · spent 12m dead" in text  # ghost
+    assert " · spent 12m 22s dead" in text  # ghost
     assert " · got Power Infusion from " in text and " 30 times" in text  # PI's favorite
 
     consumables = card_text(next(c for c in r.thread if c.title.startswith("🧪")))

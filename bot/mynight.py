@@ -5,7 +5,7 @@ Built from the same Night the report was, so its numbers always match the report
 
 from collections import Counter
 
-from .awards import Line, consumable_rows, fmt_big, fmt_duration, fmt_rate, parse_colour, plural, times
+from .awards import Line, consumable_rows, fmt_big, fmt_rate, fmt_seconds, parse_colour, plural, times
 from .config import RecapSettings
 from .gear import describe, gear_rows
 from .recap import DPS, HEALER, TANK, Char, Night
@@ -64,7 +64,7 @@ def _deaths(night: Night, char: Char) -> str:
         text += f" ({len(every)} in all)"
     dead = night.dead_seconds.get(char, 0)
     if dead >= 60:
-        text += f" · {fmt_duration(dead)} dead"
+        text += f" · {fmt_seconds(dead)} dead"
     notes = []
     killers = Counter(d.ability for d in every if d.ability)
     repeat = [(name, n) for name, n in killers.most_common() if n >= 2][:2]

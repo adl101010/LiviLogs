@@ -214,7 +214,7 @@ def test_awards():
     assert "**🛡️ Outdamaged by a tank** - **Greyson** did less damage than **Tanky**" in text
     assert "**🎯 Nemesis** - **Dyer** died to Fire 3 times" in text
     assert "**🧲 Brez magnet** - **Dyer** · rezzed 3 times" in text
-    assert "**👻 Ghost** - **Greyson** · spent 4m dead" in text
+    assert "**👻 Ghost** - **Greyson** · spent 4m 19s dead" in text
     assert "**💜 PI's favorite** - **Pumper** · got Power Infusion from **Healz** 4 times" in text
     assert "**💀 Floor inspector**\n-# Deaths before the wipe was called\n**Dyer** 3 · **Greyson** 2" in text
     # Nothing worth saying tonight: these stay silent rather than print a weak line.
@@ -381,3 +381,9 @@ def test_split_message_respects_limit():
     assert all(len(c) <= 1000 for c in chunks)
     assert "\n".join(chunks) == text
     assert split_message("y" * 2500, limit=1000) == ["y" * 1000, "y" * 1000, "y" * 500]
+
+
+def test_time_dead_has_seconds():
+    from bot.awards import fmt_seconds
+
+    assert [fmt_seconds(s) for s in (45, 60, 526.98, 3735)] == ["45s", "1m 00s", "8m 47s", "1h 02m 15s"]

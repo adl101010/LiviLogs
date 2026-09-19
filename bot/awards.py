@@ -91,6 +91,16 @@ def fmt_health(pct: float | None, phase: int | None) -> str:
     return f"P{phase} at {fmt_pct(pct)}%" if phase and phase > 1 else f"{fmt_pct(pct)}%"
 
 
+def fmt_seconds(seconds: float) -> str:
+    """Exact time, for time spent dead: "8m 47s", "45s", "1h 02m 15s"."""
+    total = int(round(seconds))
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m {secs:02d}s"
+    return f"{minutes}m {secs:02d}s" if minutes else f"{secs}s"
+
+
 def fmt_duration(seconds: float) -> str:
     minutes = int(round(seconds / 60))
     hours, minutes = divmod(minutes, 60)
@@ -502,7 +512,7 @@ class Builder:
         # Ghost: the most time spent dead, from each death until a battle rez or the end of the pull.
         chars, seconds = leaders(night.dead_seconds, 180, max_names=1)
         if chars:
-            self.add(DEATHS, [chars[0], f" · spent {fmt_duration(seconds)} dead"], "ghost", chars, title="👻 Ghost")
+            self.add(DEATHS, [chars[0], f" · spent {fmt_seconds(seconds)} dead"], "ghost", chars, title="👻 Ghost")
 
         early = Counter()
         starts = {p.id: p.start for p in night.pulls}

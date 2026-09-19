@@ -13,7 +13,7 @@ from typing import Callable
 import httpx
 
 from .config import RecapSettings, wcl_credentials
-from .recap import MANA_POTION_PATTERN
+from .recap import FLASK_PREFIXES, FOOD_PATTERN, MANA_POTION_PATTERN
 
 log = logging.getLogger(__name__)
 
@@ -146,12 +146,29 @@ _EVENT_PAGES = {
         "params": "$code: String!, $start: Float!",
         "filter": "filterExpression: \"%(mana_filter)s\", killType: Encounters",
     },
+    "buffEndEvents": {
+        "params": "$code: String!, $start: Float!",
+        "filter": "filterExpression: \"%(buff_end_filter)s\", killType: Encounters",
+    },
 }
+
+
+def _buff_end_filter(report: dict) -> str | None:
+    """WCL filter for flask and food buffs coming off, by the ids those buffs have in this log's
+    pull snapshots, or None if nobody had one."""
+    ids = set()
+    for snapshot in report.get("combatantInfo") or []:
+        for aura in snapshot.get("auras") or []:
+            name = aura.get("name") or ""
+            if isinstance(aura.get("ability"), int) and (name.startswith(FLASK_PREFIXES) or FOOD_PATTERN in name):
+                ids.add(aura["ability"])
+    if not ids:
+        return None
+    return f"type = 'removebuff' and ability.id in ({', '.join(map(str, sorted(ids)))})"
+
 
 # Mana potions change name every expansion, and WCL's filters can't match part of a name. So the
 # report's own list of abilities is searched for MANA_POTION_PATTERN, and the casts fetched by id.
-
-
 def _mana_potion_filter(report: dict) -> str | None:
     """WCL filter for casts of any mana potion that appears in this report, or None if none does."""
     abilities = (report.get("masterData") or {}).get("abilities") or []
@@ -271,6 +288,12 @@ class WCLClient:
         report["manaPotions"] = (
             await self._all_events(ref, {"nextPageTimestamp": 0}, "manaPotionEvents", variables, filters)
             if filters["mana_filter"] else []
+        )
+        # Flasks and food running out mid-pull: their buffs' ids come from the pull snapshots.
+        filters["buff_end_filter"] = _buff_end_filter(report)
+        report["buffEnds"] = (
+            await self._all_events(ref, {"nextPageTimestamp": 0}, "buffEndEvents", variables, filters)
+            if filters["buff_end_filter"] else []
         )
         return report
 

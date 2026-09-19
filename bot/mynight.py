@@ -6,7 +6,9 @@ Built from the same Night the report was, so its numbers always match the report
 import statistics
 from collections import Counter
 
-from .awards import Line, consumable_rows, fmt_big, fmt_rate, fmt_seconds, parse_colour, plural, times
+from .awards import (
+    Line, consumable_rows, fmt_big, fmt_rate, fmt_seconds, parse_colour, plural, pull_label, times,
+)
 from .config import RecapSettings
 from .gear import describe, gear_rows
 from .recap import DPS, HEALER, TANK, Char, Night
@@ -110,6 +112,11 @@ def _consumables(night: Night, char: Char, settings: RecapSettings) -> str | Non
     potions = f"{row.potted}/{row.pulls} pulls potted · {used}"
     text += "\n" + ("⚠️ " if "hoarder" in row.flags else "") + f"**Potions** · {potions}"
     text += "\n" + _potion_dots(night, char, row.role == HEALER)
+    for gone in (r for r in night.ran_out if r.char == char):
+        text += (f"\n⌛ {gone.kind.capitalize()} ran out mid-pull · {pull_label(night, gone.pull)}, "
+                 f"{fmt_seconds(gone.seconds_in)} in")
+    if row.oil_gone_pull and "no_oil" in row.flags:
+        text += f"\n⌛ Weapon oil ran out · gone from {pull_label(night, row.oil_gone_pull)} on"
     note = "🟢 one potion · 🟣 two or more · ⚫ none, one dot per pull in order"
     if any(f in row.flags for f in ("no_flask", "no_food", "no_oil", "hoarder", "healthstone_bag", "no_vantus")):
         note += " · ⚠️ = the report called it out"

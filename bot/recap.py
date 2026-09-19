@@ -172,6 +172,7 @@ class Night:
     gear_at_pull: dict[int, dict[Char, list["Item | None"]]] = field(default_factory=dict)  # pull -> player -> slots
     specs: dict[Char, int] = field(default_factory=dict)  # WoW spec id
     active: dict[Char, float] = field(default_factory=dict)  # share of time alive in pulls spent acting
+    ran_out: list["RanOut"] = field(default_factory=list)  # flask/food buffs that expired mid-pull
 
     @property
     def has_parses(self) -> bool:
@@ -492,6 +493,51 @@ def _gear_at_pull(report: dict, players: dict[int, Char],
     return dict(out), specs
 
 
+@dataclass(frozen=True)
+class RanOut:
+    """A flask or food buff that expired during a boss pull."""
+    char: Char
+    kind: str  # "flask" or "food"
+    buff: str
+    pull: int
+    seconds_in: float
+
+
+DEATH_GRACE_MS = 3000  # a buff lost this close to its owner's death went with the death, not the clock
+
+
+def _ran_out(report: dict, players: dict[int, Char], pulls: list[Pull],
+             deaths: dict[int, list["Death"]]) -> list[RanOut]:
+    """Flask and food buffs that came off mid-pull. Normal food falls off on death (Hearty food
+    doesn't), so anything lost within a few seconds of its owner's death isn't counted."""
+    names: dict[int, str] = {}
+    for snapshot in report.get("combatantInfo") or []:
+        for aura in snapshot.get("auras") or []:
+            if isinstance(aura.get("ability"), int):
+                names[aura["ability"]] = aura.get("name") or ""
+    by_id = {p.id: p for p in pulls}
+    died = defaultdict(list)
+    for pull_id, ds in deaths.items():
+        for d in ds:
+            died[(pull_id, d.char)].append(d.time)
+    out = []
+    events = report.get("buffEnds")
+    for e in events if isinstance(events, list) else []:
+        char = players.get(e.get("targetID"))
+        pull = by_id.get(e.get("fight"))
+        name = names.get(e.get("abilityGameID"), "")
+        if not char or not pull or e.get("type") != "removebuff":
+            continue
+        kind = "flask" if name.startswith(FLASK_PREFIXES) else "food" if FOOD_PATTERN in name else None
+        at = e.get("timestamp") or 0
+        if kind is None or not pull.start <= at <= pull.end:
+            continue
+        if any(-1000 <= at - t <= DEATH_GRACE_MS for t in died.get((pull.id, char), [])):
+            continue
+        out.append(RanOut(char, kind, name, pull.id, (at - pull.start) / 1000))
+    return sorted(out, key=lambda r: (r.pull, r.seconds_in, r.char.name.casefold()))
+
+
 def _auras_at_pull(report: dict, players: dict[int, Char], pull_ids: set[int]) -> dict[int, dict[Char, list[str]]]:
     """WCL snapshots every player's buffs as each pull starts: flask, food, rune, vantus."""
     out: dict[int, dict[Char, list[str]]] = defaultdict(dict)
@@ -679,4 +725,5 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
         gear_at_pull=gear_at_pull,
         specs=specs,
         active=_active_share(report, players, roles, pulls_in, pulls, dead_seconds),
+        ran_out=_ran_out(report, players, pulls, deaths),
     )

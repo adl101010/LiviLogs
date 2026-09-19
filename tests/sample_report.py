@@ -68,6 +68,10 @@ def _table(**totals):
 BOSS_PULLS = [1, 2, 3, 5, 6]
 
 
+AURA_IDS = {name: 1000 + i for i, name in enumerate(
+    ["Arcane Intellect", "Flask of the Magisters", "Hearty Well Fed", "Void-Touched", "Vantus Rune: Boss C"])}
+
+
 def _snapshot(pid, fight):
     """What a player had on as the pull started."""
     auras = ["Arcane Intellect"]
@@ -80,7 +84,12 @@ def _snapshot(pid, fight):
     if fight in (5, 6) and pid != 4:
         auras.append("Vantus Rune: Boss C")
     return {"type": "combatantinfo", "fight": fight, "sourceID": pid,
-            "auras": [{"name": a, "ability": 1000 + i} for i, a in enumerate(auras)]}
+            "auras": [{"name": a, "ability": AURA_IDS[a]} for a in auras]}
+
+
+def _buff_end(pid, fight, time, name):
+    return {"type": "removebuff", "sourceID": pid, "targetID": pid, "fight": fight, "timestamp": time,
+            "abilityGameID": AURA_IDS[name]}
 
 
 def _potions():
@@ -186,5 +195,11 @@ def report():
         "potions": _potions(),
         # Healz's 4 mana potions as casts, per pull: two on pull 6, one each on 1 and 5.
         "manaPotions": [{"type": "cast", "sourceID": 2, "fight": f, "abilityGameID": 1236648} for f in (1, 5, 6, 6)],
+        # Buffs coming off mid-pull: Pumper's flask ran out 100 s into Boss C's second pull; Dyer's
+        # food came off with a death on pull 1 (not counted); a feast ran out for five raiders on
+        # pull 6 (one "raid food" line).
+        "buffEnds": [_buff_end(3, 6, 1_100_000, "Flask of the Magisters"),
+                     _buff_end(5, 1, 40_100, "Hearty Well Fed")]
+                    + [_buff_end(pid, 6, 1_150_000 + pid * 1000, "Hearty Well Fed") for pid in (1, 2, 3, 5, 6)],
         "casts": _cast_table(),
     }

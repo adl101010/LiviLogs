@@ -47,7 +47,7 @@ The thread has seven sections, each its own card, posted only if it has somethin
 | 🌟 Highlights | 🩷 Pink parse, 🎵 Metronome, 🦶 Kick captain, 🧼 Dispel machine, 🪄 Necromancer, 💜 PI's favorite (who got Power Infusion from someone else the most), 🧍 Last one standing |
 | 🤡 Lowlights | 🚽 Parse of shame, 🎢 Rollercoaster, ⚔️ Battle healer, 🧽 Damage sponge, 🛡️ Outdamaged by a tank, 💤 Idle (DPS and tanks well under the raid's usual active time) |
 | 💀 Deaths | 💀 Floor inspector, 🐤 Canary, 🎁 Couldn't wait for loot, 🎯 Nemesis, 🧲 Brez magnet, 👻 Ghost (most time spent dead, 3 minutes or more), ⏱️ Speedrunner |
-| 🧪 Consumables | 🔮 Tryhards (Void-Touched rune), 🍺 Potion seller, 🫗 Mana chugger, 🍪 Cookie monster, 🧪 Potion hoarders, 🪦 Died with a healthstone in the bag, ⚗️ No flask, 🍗 Forgot to eat, 🛢️ No weapon oil, 📜 No vantus. Retail only |
+| 🧪 Consumables | 🔮 Tryhards (Void-Touched rune), 🍺 Potion seller, 🫗 Mana chugger, 🍪 Cookie monster, 🧪 Potion hoarders, 🪦 Died with a healthstone in the bag, ⚗️ No flask, 🍗 Forgot to eat, 🛢️ No weapon oil, 📜 No vantus, ⌛ Ran out mid-pull (flask or food expired during a pull; weapon oil that ran out between pulls). Retail only |
 | 🛠️ Gear check | A chart of every raider's enchants and gems, then 🔧 Missing enchants, 🎁 Unwrapped loot (new piece worn unenchanted), 💎 Empty sockets. Retail only |
 
 **Charts.** Four parts of the thread are pictures the bot draws:
@@ -94,6 +94,13 @@ How the numbers work:
   as healing, so every healer reads near 100%.
 - **Weapon oil** is read from the main hand in each pull's gear snapshot: oils, sharpening stones
   and shaman imbues all count. Missing it on 2+ pulls is called out, like flask and food.
+- **Ran out mid-pull**: WCL logs the moment a flask or food buff comes off, so a buff that expired
+  during a boss pull is listed with the pull and how far in. Regular food falls off when you die
+  (Hearty food doesn't), so a buff lost within 3 seconds of its owner's death isn't counted. When 5
+  or more raiders' food runs out on the same pull, it's one "raid food ran out" line: one feast
+  wearing off. Weapon oil isn't in the combat log, only in each pull's gear snapshot, so for oil it
+  says which pull it was gone from (for anyone the No weapon oil rule flags). One extra small WCL
+  query per report, for just this log's flask and food buffs.
 - **Deaths** count every boss pull, kills and wipes, but only the first 5 deaths of each pull: people
   who die after the wipe is called don't get blamed. Ties are included unless it's a pile-up.
 - **History:** the bot remembers every night it posts, so progression bosses can say "last raid's

@@ -240,6 +240,11 @@ def test_consumables_card():
         # Only Boss C's pulls count for vantus: nobody used one on A or B.
         "**⚗️ No flask** - **Greyson** 2 of 5 pulls\n**🍗 Forgot to eat** - **Dyer** 2 of 5 pulls\n\n"
         "**📜 No vantus**\n-# On pulls where most of the raid had one\n**Greyson** all 2 pulls",
+        # Dyer's food came off with a death, so it isn't here; five raiders' food going at once is
+        # one feast wearing off.
+        "**⌛ Ran out mid-pull**\n-# Flask or food that expired during a boss pull\n"
+        "**Pumper** flask · Boss C pull 2, 1m 40s in\n"
+        "Raid food ran out for 5 raiders · Boss C pull 2, about 2m 30s in",
     ]
 
 

@@ -160,6 +160,7 @@ def parse_colour(pct: float) -> str:
 
 ROLE_EMOJI = {DPS: "⚔️", HEALER: "💚", TANK: "🛡️"}
 ROLE_NAMES = {DPS: "Damage", HEALER: "Healing", TANK: "Tanks"}
+RAID_FOOD_MIN = 5  # this many raiders' food running out on one pull is one feast wearing off
 IDLE_GAP = 0.10  # 10 points under the raid's usual active time
 IDLE_MIN_RAIDERS = 5  # too few DPS and tanks to say what's usual
 PHASE_BARS = "▁▂▃▄▅▆▇█"
@@ -546,6 +547,47 @@ class Builder:
 
     # --- consumables ---------------------------------------------------------------------------
 
+    def ran_out(self) -> None:
+        """Flasks and food that expired mid-pull, and weapon oil that ran out between pulls. When
+        most of the raid's food goes at once (one feast wearing off), it's one line, not a list."""
+        night = self.night
+        entries: list[tuple[int, float, list[Part]]] = []  # (pull, seconds in, text) to sort by time
+        winners: list[Char] = []
+        food: dict[int, list] = {}
+        for r in night.ran_out:
+            if r.kind == "food":
+                food.setdefault(r.pull, []).append(r)
+        grouped = {pull for pull, gone in food.items() if len(gone) >= RAID_FOOD_MIN}
+        for r in night.ran_out:
+            if r.kind == "food" and r.pull in grouped:
+                continue
+            entries.append((r.pull, r.seconds_in, [r.char, f" {r.kind} · {pull_label(night, r.pull)}, "
+                                                            f"{fmt_seconds(r.seconds_in)} in"]))
+            winners.append(r.char)
+        for pull in sorted(grouped):
+            gone = food[pull]
+            at = statistics.median(r.seconds_in for r in gone)
+            entries.append((pull, at, [f"Raid food ran out for {len(gone)} raiders · {pull_label(night, pull)}, "
+                                       f"about {fmt_seconds(round(at / 10) * 10)} in"]))
+        oil = sorted((r for r in consumable_rows(night, self.settings) if r.oil_gone_pull and "no_oil" in r.flags),
+                     key=lambda r: r.char.name.casefold())
+        for r in oil:
+            gone = pull_label(night, r.oil_gone_pull)
+            entries.append((r.oil_gone_pull, -1, [r.char, f" weapon oil · gone from {gone} on"]))
+            winners.append(r.char)
+        if not entries:
+            return
+        order = {p.id: i for i, p in enumerate(night.pulls)}
+        parts: list[Part] = []
+        for i, (_, _, text) in enumerate(sorted(entries, key=lambda e: (order.get(e[0], 0), e[1]))):
+            if i:
+                parts.append("\n")
+            parts += text
+        self.add(CONSUMABLES, parts, "ran_out", list(dict.fromkeys(winners)), title="⌛ Ran out mid-pull",
+                 note="Flask or food that expired during a boss pull"
+                      + (", and weapon oil between pulls" if oil else ""),
+                 cluster="upkeep", stacked=True)
+
     # --- gear check ----------------------------------------------------------------------------
 
     def gear(self) -> None:
@@ -723,6 +765,8 @@ class Builder:
             self.add(CONSUMABLES, parts, "no_oil", [r.char for r in unoiled], title="🛢️ No weapon oil",
                      cluster="prep", chart="consumables")
 
+        self.ran_out()
+
         # No vantus: only pulls where at least half the raid had one, so skipping it on farm
         # bosses is never called out.
         vantus_pulls: Counter = Counter()
@@ -755,6 +799,15 @@ class Builder:
                      note="On pulls where most of the raid had one", cluster="prep", chart="consumables")
 
 
+def pull_label(night: Night, pull_id: int) -> str:
+    """'Ula'tek pull 4': the boss, and which of its pulls tonight."""
+    for boss in night.bosses:
+        for i, pull in enumerate(boss.pulls):
+            if pull.id == pull_id:
+                return f"{boss.name} pull {i + 1}" if len(boss.pulls) > 1 else boss.name
+    return "a pull"
+
+
 def progress_chart_key(boss: Boss, index: int) -> str | None:
     """Bosses pulled 3+ times with the boss's health known on every pull get a chart."""
     if len(boss.pulls) >= 3 and all(p.boss_pct is not None for p in boss.pulls):
@@ -784,6 +837,7 @@ class ConsumableRow:
     potted: int = 0  # "pulls potted": pulls with at least one potion (for healers, a mana potion counts)
     oil: int = 0  # pulls with a weapon oil (or stone, or shaman imbue) on the main hand
     oil_pulls: int = 0  # pulls with a main-hand weapon in the log's gear snapshot
+    oil_gone_pull: int | None = None  # first pull without weapon oil after having it: it ran out between pulls
 
 
 def consumable_rows(night: Night, settings: RecapSettings) -> list[ConsumableRow]:
@@ -822,6 +876,18 @@ def consumable_rows(night: Night, settings: RecapSettings) -> list[ConsumableRow
             if weapon:
                 row.oil_pulls += 1
                 row.oil += weapon.oiled
+    for char, row in rows.items():
+        had = False
+        for pull in night.pulls:
+            gear = night.gear_at_pull.get(pull.id, {}).get(char)
+            weapon = gear[15] if gear and len(gear) > 15 else None
+            if not weapon:
+                continue
+            if weapon.oiled:
+                had = True
+            elif had:
+                row.oil_gone_pull = pull.id
+                break
     counted = Counter(d.char for ds in night.counted.values() for d in ds)
     for row in rows.values():
         if row.oil_pulls - row.oil >= 2:

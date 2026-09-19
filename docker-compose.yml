@@ -15,7 +15,7 @@ services:
       TIMEZONE: ${TIMEZONE:-UTC}
       THREAD_PING_EVERYONE: ${THREAD_PING_EVERYONE:-true}
       CHARTS: ${CHARTS:-true}
-      MY_NIGHT: ${MY_NIGHT:-true}
+      MY_NIGHT: ${MY_NIGHT:-false}
       PARSE_HIGH: ${PARSE_HIGH:-90}
       PARSE_GREY: ${PARSE_GREY:-25}
       GREY_INCLUDE_TANKS: ${GREY_INCLUDE_TANKS:-false}

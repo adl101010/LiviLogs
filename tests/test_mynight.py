@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from dataclasses import replace
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -107,12 +108,21 @@ def texts(view):
     return "\n".join(getattr(i, "content", "") or "" for i in view.walk_children())
 
 
-def test_the_headline_has_the_button():
+def bot_buttons(message):
+    return [i.custom_id for i in message.view.walk_children() if isinstance(i, discord.ui.Button) and i.url is None]
+
+
+def test_the_button_is_off_by_default():
     bot, channel = make_bot(FakeWCL())
     post_link(bot, channel)
-    ids = [i.custom_id for i in channel.sent[0].view.walk_children() if isinstance(i, discord.ui.Button)
-           and i.url is None]
-    assert ids == [BUTTON]
+    assert bot_buttons(channel.sent[0]) == []
+
+
+def test_my_night_true_puts_the_button_on_the_headline():
+    bot, channel = make_bot(FakeWCL())
+    bot.config = replace(bot.config, my_night=True)
+    post_link(bot, channel)
+    assert bot_buttons(channel.sent[0]) == [BUTTON]
 
 
 def test_thread_cards_upload_their_charts():

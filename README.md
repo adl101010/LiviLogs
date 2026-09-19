@@ -21,10 +21,11 @@ button:
 ┃ 🗑️ Grey - @Totemtoss healing 20.3
 ┃ 💀 Floor inspector - @Facepull 11 deaths
 ┃ 🧵 Full report in the thread
-┃ [ 👤 My night ]  [ View log on Warcraft Logs ↗ ]
+┃ [ View log on Warcraft Logs ↗ ]
 ```
 
-**👤 My night** shows whoever presses it a card only they can see: their parse on every boss, their
+**👤 My night** (off by default; set `MY_NIGHT=true` to turn it on) adds a button to the headline.
+It shows whoever presses it a card only they can see: their parse on every boss, their
 deaths and what killed them, their consumables (with ⚠️ on anything the report called out, and a
 dot per pull for potions: 🟢 one, 🟣 two or more, ⚫ none), their
 interrupts, dispels and damage, and which callouts they got. It uses the characters an admin has

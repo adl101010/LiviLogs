@@ -121,7 +121,7 @@ class Config:
     thread_ping_everyone: bool
     recap: RecapSettings
     charts: bool = True  # parse, consumables and progress pictures in the thread
-    my_night: bool = True  # the "My night" button on the headline
+    my_night: bool = False  # the "My night" button on the headline (off unless MY_NIGHT=true)
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -138,7 +138,7 @@ class Config:
             thread_ping_everyone=_bool("THREAD_PING_EVERYONE", True),
             recap=RecapSettings.from_env(),
             charts=_bool("CHARTS", True),
-            my_night=_bool("MY_NIGHT", True),
+            my_night=_bool("MY_NIGHT", False),
         )
 
 

@@ -309,27 +309,19 @@ def test_featured_boss_for_the_thumbnail():
 
 
 class FakeHistory:
-    def __init__(self, last=None, streaks=None):
+    def __init__(self, last=None):
         self.last = last
-        self.streaks = streaks or {}
 
     def last_result(self, encounter_id, difficulty, before_ms):
         return self.last
 
-    def streak(self, key, char, before_ms):
-        return self.streaks.get((key, char.name), 0)
 
-
-def test_history_adds_progress_and_streaks():
-    history = FakeHistory(
-        last=BossResult(killed=False, boss_pct=44, phase=3),
-        streaks={("floor", "Dyer"): 2, ("grey", "Greyson"): 1, ("sponge", "Dyer"): 1},
-    )
+def test_history_adds_last_raids_progress():
+    history = FakeHistory(last=BossResult(killed=False, boss_pct=44, phase=3))
     text = all_text(full_text(history=history))
     assert "**📈 Boss C** - 2 wipes · best P2 at 30% · last raid's best: P3 at 44%" in text
-    assert "**💀 Floor inspector** - **Dyer** 3 deaths (3 raids running)" in text
-    assert "**🗑️ Grey** - **Greyson** damage 20.0 (2 raids running)" in text
-    assert "**🧽 Damage sponge** - **Dyer** · 100M damage taken (2 raids running)" in text
+    assert "**💀 Floor inspector** - **Dyer** 3 deaths\n" in text  # no streaks on people's callouts
+    assert "raids running" not in text
 
 
 def test_thread_title_uses_the_guilds_timezone():

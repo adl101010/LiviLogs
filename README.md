@@ -88,8 +88,8 @@ How the numbers work:
   headline shows the best pull and how it compares with last raid's.
 - **Deaths** count every boss pull, kills and wipes, but only the first 5 deaths of each pull: people
   who die after the wipe is called don't get blamed. Ties are included unless it's a pile-up.
-- **History:** the bot remembers every night it posts, so it can say "last raid's best: P3 at 44%"
-  and "(3 raids running)" when someone wins the same callout again.
+- **History:** the bot remembers every night it posts, so progression bosses can say "last raid's
+  best: P3 at 44%". Callouts about people are about tonight only.
 - **Every callout checks whether the night gives it something worth saying** and stays silent
   otherwise, so the report is as long as the night was eventful.
 - **Consumables** (retail): flask, food, augment rune and vantus come from the buffs WCL records on
@@ -138,7 +138,7 @@ is only posted once.
 | `/unlink <character> [realm]` | **Admins.** Remove a link |
 | `/links [member]` | Anyone. Show someone's characters; with no member, list who from the last report isn't linked |
 | `/recap <link>` | Post the report right now, without waiting |
-| `/recap <link> record_only:True` | Add a past night to history without posting it, so "last raid's best" and streaks work from the first real post |
+| `/recap <link> record_only:True` | Add a past night to history without posting it, so "last raid's best" works from the first real post |
 
 Unlinked characters still appear in the report, in bold, with a nudge at the end of the thread.
 
@@ -183,8 +183,7 @@ history, which logs were posted) lives in the `livilogs-data` volume.
 ## Trying it without Discord
 
 `tools/probe.py` pulls real logs through the API and prints exactly what the bot would post. Give it
-several links and it replays them oldest first, so later reports show history ("last raid's best",
-"2 raids running").
+several links and it replays them oldest first, so later reports show "last raid's best".
 
 ```
 python -m venv .venv

@@ -2,7 +2,7 @@
 
 They pin the real JSON shape: if WCL changes it, or a change here breaks reading it, these fail.
 guild_kill and guild_prog are one guild's consecutive nights (Sep 15 and 16), so they also test
-history: "last raid's best" and "2 raids running".
+history: "last raid's best".
 """
 
 import json
@@ -97,9 +97,9 @@ def test_consecutive_nights_build_history():
                            winners_by_key(lines))
     headline = card_text(r.headline)
     assert "· last raid's best: P3 at 44%" in headline
-    assert "10 deaths (2 raids running)" in headline  # floor inspector both nights
-    assert "9 battle rezzes (2 raids running)" in text
-    assert "(1.5× the next healer, 2 raids running)" in text
+    # The same people won the same callouts both nights; that isn't mentioned.
+    assert "raids running" not in text and "raids running" not in headline
+    assert "10 deaths" in headline and "9 battle rezzes" in text
 
 
 def test_classic_tbc():

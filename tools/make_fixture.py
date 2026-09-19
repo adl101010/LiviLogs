@@ -4,8 +4,8 @@
 
 Every player name and realm is replaced wherever it appears as a JSON string (rankings, tables,
 dispel targets...). Replacements are derived from the real name, so the same player gets the same
-placeholder in every fixture, which history tests ("3 raids running") depend on. Guild names are dropped, and bulky per-ability breakdowns the bot never reads
-are trimmed so fixtures stay small.
+placeholder in every fixture. Guild names are dropped, and bulky per-ability breakdowns the bot
+never reads are trimmed so fixtures stay small.
 """
 
 import hashlib

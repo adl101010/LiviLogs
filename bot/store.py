@@ -43,7 +43,7 @@ CREATE TABLE IF NOT EXISTS reports (
     error TEXT,
     PRIMARY KEY (host, code)
 );
--- One row per recapped night, for "last raid's best" and "3 raids running".
+-- One row per recapped night, for "last raid's best".
 CREATE TABLE IF NOT EXISTS history (
     host TEXT NOT NULL,
     code TEXT NOT NULL,
@@ -272,13 +272,3 @@ class Store:
                 if boss["encounter_id"] == encounter_id and boss["difficulty"] == difficulty:
                     return BossResult(boss["killed"], boss["boss_pct"], boss["phase"])
         return None
-
-    def streak(self, key: str, char: Char, before_ms: int) -> int:
-        """How many nights in a row, going back from this one, `char` won `key`."""
-        count = 0
-        for row in self._history_before(before_ms):
-            winners = json.loads(row["winners"]).get(key, [])
-            if char.key not in {Char(n, r).key for n, r in winners}:
-                break
-            count += 1
-        return count

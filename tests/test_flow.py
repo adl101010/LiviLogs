@@ -162,7 +162,6 @@ def test_posting_remembers_the_night_for_next_time():
     bot, channel = make_bot(FakeWCL())
     post_link(bot, channel)
     later = report()["startTime"] + 7 * 86_400_000
-    assert bot.store.streak("floor", Char("Dyer", "Area 52"), later) == 1
     last = bot.store.last_result(3011, 4, later)
     assert (last.killed, last.boss_pct, last.phase) == (False, 30, 2)
 

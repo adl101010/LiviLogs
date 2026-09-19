@@ -322,7 +322,7 @@ class RecapBot(discord.Client):
         return BOSS_ICON.format(boss) if self._icons[boss] else None
 
     def record(self, ref: ReportRef, built: Built, channel_id: int | None) -> None:
-        """Remember the night for next time ("last raid's best", "3 raids running")."""
+        """Remember the night for next time ("last raid's best")."""
         self.store.save_history(ref, built.night.start_ms, boss_results(built.night), winners_by_key(built.lines))
         self.store.mark_posted(ref, built.night.roster, channel_id)
 
@@ -631,7 +631,7 @@ async def links_command(interaction: discord.Interaction, member: discord.Member
 @app_commands.command(name="recap", description="Post the raid report for a Warcraft Logs link right now")
 @app_commands.describe(
     link="The Warcraft Logs report link",
-    record_only="Only add the night to history (for streaks and progress) without posting it",
+    record_only="Only add the night to history (for \"last raid's best\") without posting it",
 )
 @app_commands.guild_only()
 async def recap_command(interaction: discord.Interaction, link: str, record_only: bool = False):

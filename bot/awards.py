@@ -7,7 +7,6 @@ rather than names; the renderer turns those into Discord mentions and decides ho
 """
 
 import math
-import re
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -34,7 +33,7 @@ Part = str | Char
 class Line:
     section: str
     parts: list[Part]  # the body: names and numbers
-    key: str | None = None  # awards remember their winners, for "3 raids running"
+    key: str | None = None  # which award this is; its winners are saved with the night
     winners: list[Char] = field(default_factory=list)
     title: str | None = None  # "🍺 Potion seller"; None for plain lines
     note: str | None = None  # small print under the title, e.g. "Void-Touched rune"
@@ -59,15 +58,10 @@ class BossResult:
 class History(Protocol):
     def last_result(self, encounter_id: int, difficulty: int | None, before_ms: int) -> BossResult | None: ...
 
-    def streak(self, key: str, char: Char, before_ms: int) -> int: ...
-
 
 class NoHistory:
     def last_result(self, encounter_id, difficulty, before_ms):
         return None
-
-    def streak(self, key, char, before_ms):
-        return 0
 
 
 # --- formatting --------------------------------------------------------------------------------
@@ -155,7 +149,6 @@ def parse_colour(pct: float) -> str:
 
 ROLE_EMOJI = {DPS: "⚔️", HEALER: "💚", TANK: "🛡️"}
 ROLE_NAMES = {DPS: "Damage", HEALER: "Healing", TANK: "Tanks"}
-_RUNNING = re.compile(r"^ \((\d+ raids running)\)$")
 PHASE_BARS = "▁▂▃▄▅▆▇█"
 
 
@@ -169,19 +162,8 @@ class Builder:
     def add(self, section: str, parts: list[Part], key: str | None = None,
             winners: list[Char] | None = None, *, title: str | None = None, note: str | None = None,
             cluster: str = "", stacked: bool | None = None, chart: str | None = None) -> None:
-        # "(10 deaths) (2 raids running)" reads better as "(10 deaths, 2 raids running)".
-        merged: list[Part] = []
-        for part in parts:
-            match = _RUNNING.match(part) if isinstance(part, str) else None
-            if match and merged and isinstance(merged[-1], str) and merged[-1].endswith(")"):
-                merged[-1] = f"{merged[-1][:-1]}, {match.group(1)})"
-            elif part != "":
-                merged.append(part)
-        self.lines.append(Line(section, merged, key, winners or [], title, note, cluster, stacked, chart))
-
-    def running(self, key: str, char: Char) -> str:
-        streak = self.history.streak(key, char, self.night.start_ms)
-        return f" ({streak + 1} raids running)" if streak else ""
+        parts = [part for part in parts if part != ""]
+        self.lines.append(Line(section, parts, key, winners or [], title, note, cluster, stacked, chart))
 
     # --- headline ------------------------------------------------------------------------------
 
@@ -218,8 +200,7 @@ class Builder:
         top = [d for d in night.floor if d.deaths == night.floor[0].deaths] if night.floor else []
         if top and top[0].deaths >= 2:
             each = " each" if len(top) > 1 else ""
-            self.add(HEADLINE, [*joined([d.char for d in top]), f" {top[0].deaths} deaths{each}",
-                                self.running("floor", top[0].char) if len(top) == 1 else ""],
+            self.add(HEADLINE, [*joined([d.char for d in top]), f" {top[0].deaths} deaths{each}"],
                      "floor", [d.char for d in top], title="💀 Floor inspector", cluster="calls", stacked=False)
 
     def progress_lines(self, unkilled: list[Boss]) -> None:
@@ -238,8 +219,6 @@ class Builder:
 
     def top_line(self, title: str, key: str, chars: list[Char], value: str) -> None:
         parts: list[Part] = [*joined(chars), f" {value}"]
-        if len(chars) == 1:
-            parts.append(self.running(key, chars[0]))
         self.add(HEADLINE, parts, key, chars, title=title, cluster="tops", stacked=False)
 
     def parse_list(self, lines: list[ParseLine], key: str) -> list[Part]:
@@ -248,9 +227,7 @@ class Builder:
             if i:
                 parts.append(" · ")
             kind = "healing" if p.role == HEALER else "damage"
-            streak = self.history.streak(key, p.char, self.night.start_ms)
-            running = f" ({streak + 1} raids running)" if streak else ""
-            parts += [p.char, f" {kind} {p.average:.1f}{running}"]
+            parts += [p.char, f" {kind} {p.average:.1f}"]
         return parts
 
     def last_raid(self, boss: Boss) -> str:
@@ -382,8 +359,8 @@ class Builder:
         if spreads:
             s, p = min(spreads, key=lambda sp: (sp[0], -sp[1].average))
             lo, hi = min(v for v, _ in p.parses), max(v for v, _ in p.parses)
-            self.add(HIGHLIGHTS, [p.char, f" · {lo:.0f} to {hi:.0f} on every boss",
-                                  self.running("metronome", p.char)], "metronome", [p.char], title="🎵 Metronome")
+            self.add(HIGHLIGHTS, [p.char, f" · {lo:.0f} to {hi:.0f} on every boss"], "metronome", [p.char],
+                     title="🎵 Metronome")
 
         self.counter_award(HIGHLIGHTS, "kick", "🦶 Kick captain", night.interrupts, 5, "interrupt", next_best=True)
         self.counter_award(HIGHLIGHTS, "dispel", "🧼 Dispel machine", night.dispels, 10, "dispel")
@@ -405,13 +382,13 @@ class Builder:
             givers = Counter({g: t for (g, r), t in night.power_infusion.items() if r == chars[0]})
             giver, from_them = givers.most_common(1)[0]
             source: list[Part] = [" from ", giver] if from_them == n else [" from ", giver, " and others"]
-            self.add(HIGHLIGHTS, [chars[0], " · got Power Infusion", *source, f" {times(int(n))}",
-                                  self.running("pi", chars[0])], "pi", chars, title="💜 PI's favorite")
+            self.add(HIGHLIGHTS, [chars[0], " · got Power Infusion", *source, f" {times(int(n))}"], "pi", chars,
+                     title="💜 PI's favorite")
 
         chars, n = leaders(last, 3, max_names=1)
         if chars and wipes_with_deaths >= 3:
-            self.add(HIGHLIGHTS, [chars[0], f" · last to die on {int(n)} of {wipes_with_deaths} wipes",
-                                  self.running("last_standing", chars[0])], "last_standing", chars,
+            self.add(HIGHLIGHTS, [chars[0], f" · last to die on {int(n)} of {wipes_with_deaths} wipes"],
+                     "last_standing", chars,
                      title="🧍 Last one standing")
 
     def counter_award(self, section: str, key: str, title: str, counts: Counter, minimum: int,
@@ -425,8 +402,7 @@ class Builder:
             rest = sorted((v for c, v in counts.items() if c not in chars), reverse=True)
             if rest:
                 tail += f" (next best: {int(rest[0])})"
-        running = self.running(key, chars[0]) if len(chars) == 1 else ""
-        self.add(section, [*joined(chars), tail, running], key, chars, title=title)
+        self.add(section, [*joined(chars), tail], key, chars, title=title)
 
     # --- lowlights -----------------------------------------------------------------------------
 
@@ -436,7 +412,7 @@ class Builder:
         if worst:
             pct, boss, p = min(worst, key=lambda w: (w[0], w[2].char.name.casefold()))
             if pct <= 10:
-                self.add(LOWLIGHTS, [p.char, f" · {pct:.0f} on {boss}", self.running("shame", p.char)],
+                self.add(LOWLIGHTS, [p.char, f" · {pct:.0f} on {boss}"],
                          "shame", [p.char], title="🚽 Parse of shame")
 
         swings = []
@@ -459,14 +435,14 @@ class Builder:
             ratio_text = f"{ratio:.0f}×" if ratio >= 2.95 else f"{ratio:.1f}×"
             grey = next((p for p in night.grey if p.char == char), None)
             grey_text = f" with a {grey.average:.1f} healing parse" if grey else ""
-            self.add(LOWLIGHTS, [char, f" · {fmt_big(dmg)} damage ({ratio_text} the next healer){grey_text}",
-                                 self.running("battle_healer", char)], "battle_healer", [char], title="⚔️ Battle healer")
+            self.add(LOWLIGHTS, [char, f" · {fmt_big(dmg)} damage ({ratio_text} the next healer){grey_text}"],
+                     "battle_healer", [char], title="⚔️ Battle healer")
 
         taken = sorted(((v, c) for c, v in night.damage_taken.items() if night.roles.get(c) != TANK),
                        key=lambda vc: -vc[0])
         if taken:
             v, char = taken[0]
-            self.add(LOWLIGHTS, [char, f" · {fmt_big(v)} damage taken", self.running("sponge", char)],
+            self.add(LOWLIGHTS, [char, f" · {fmt_big(v)} damage taken"],
                      "sponge", [char], title="🧽 Damage sponge")
 
         damage_rates = {r.char: r.per_second for r in night.rates if r.role in (DPS, TANK)}
@@ -499,8 +475,7 @@ class Builder:
         chars, n = leaders(firsts, 3)
         if chars:
             each = " each" if len(chars) > 1 else ""
-            self.add(DEATHS, [*joined(chars), f" · first to die {times(int(n))}{each}",
-                              self.running("canary", chars[0]) if len(chars) == 1 else ""], "canary", chars,
+            self.add(DEATHS, [*joined(chars), f" · first to die {times(int(n))}{each}"], "canary", chars,
                      title="🐤 Canary")
 
         kill_ids = {p.id for p in night.pulls if p.kill}
@@ -521,15 +496,13 @@ class Builder:
         chars, n = leaders(night.brezzed, 3)
         if chars:
             each = " each" if len(chars) > 1 else ""
-            self.add(DEATHS, [*joined(chars), f" · rezzed {times(int(n))}{each}",
-                              self.running("brez_magnet", chars[0]) if len(chars) == 1 else ""],
+            self.add(DEATHS, [*joined(chars), f" · rezzed {times(int(n))}{each}"],
                      "brez_magnet", chars, title="🧲 Brez magnet")
 
         # Ghost: the most time spent dead, from each death until a battle rez or the end of the pull.
         chars, seconds = leaders(night.dead_seconds, 180, max_names=1)
         if chars:
-            self.add(DEATHS, [chars[0], f" · spent {fmt_duration(seconds)} dead",
-                              self.running("ghost", chars[0])], "ghost", chars, title="👻 Ghost")
+            self.add(DEATHS, [chars[0], f" · spent {fmt_duration(seconds)} dead"], "ghost", chars, title="👻 Ghost")
 
         early = Counter()
         starts = {p.id: p.start for p in night.pulls}
@@ -631,23 +604,20 @@ class Builder:
         if chars:
             pulls = len(night.pulls_in.get(chars[0], ()))
             tail = f" · {int(n)} combat potions each" if len(chars) > 1 else f" · {int(n)} combat potions in {pulls} pulls"
-            self.add(CONSUMABLES, [*joined(chars), tail,
-                                   self.running("potion_seller", chars[0]) if len(chars) == 1 else ""],
+            self.add(CONSUMABLES, [*joined(chars), tail],
                      "potion_seller", chars, title="🍺 Potion seller", cluster="shoutouts")
 
         healer_mana = Counter({c: v for c, v in night.mana_potions.items() if night.roles.get(c) == HEALER})
         chars, n = leaders(healer_mana, 3, max_names=2)
         if chars:
             each = " each" if len(chars) > 1 else ""
-            self.add(CONSUMABLES, [*joined(chars), f" · {int(n)} mana potions{each}",
-                                   self.running("mana_chugger", chars[0]) if len(chars) == 1 else ""],
+            self.add(CONSUMABLES, [*joined(chars), f" · {int(n)} mana potions{each}"],
                      "mana_chugger", chars, title="🫗 Mana chugger", cluster="shoutouts")
 
         chars, n = leaders(night.health_items, 10, max_names=2)
         if chars:
             each = " each" if len(chars) > 1 else ""
-            self.add(CONSUMABLES, [*joined(chars), f" · {int(n)} healthstones and health potions{each}",
-                                   self.running("cookie", chars[0]) if len(chars) == 1 else ""],
+            self.add(CONSUMABLES, [*joined(chars), f" · {int(n)} healthstones and health potions{each}"],
                      "cookie", chars, title="🍪 Cookie monster", cluster="shoutouts")
 
         # Potion hoarders. DPS and tanks: no combat potion on more than half their pulls. Healers

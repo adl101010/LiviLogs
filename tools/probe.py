@@ -4,7 +4,7 @@
 
 Reads WCL_CLIENT_ID / WCL_CLIENT_SECRET (and optionally TIMEZONE) from .env. With several links,
 the nights are replayed oldest first into a throwaway history, so later reports show "last raid's
-best" and "N raids running" the way the bot would. Nobody is linked, so names print in bold.
+best" the way the bot would. Nobody is linked, so names print in bold.
 
 --compare also prints each player's night average under both WCL parse comparisons (Rankings and
 Parses), for checking against the report page. Raw JSON and the chart pictures are saved to

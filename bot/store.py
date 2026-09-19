@@ -52,6 +52,11 @@ CREATE TABLE IF NOT EXISTS history (
     winners TEXT NOT NULL,             -- JSON {award key: [[name, realm], ...]}
     PRIMARY KEY (host, code)
 );
+-- Settings admins change from Discord with /settings.
+CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+);
 """
 
 
@@ -76,6 +81,21 @@ class Store:
         self._db = sqlite3.connect(path)
         self._db.row_factory = sqlite3.Row
         self._db.executescript(_SCHEMA)
+
+    # --- settings ----------------------------------------------------------------------------
+
+    def get_setting(self, key: str, default: str | None = None) -> str | None:
+        row = self._db.execute("SELECT value FROM settings WHERE key = ?", (key,)).fetchone()
+        return row["value"] if row else default
+
+    def set_setting(self, key: str, value: str) -> None:
+        with self._db:
+            self._db.execute("INSERT OR REPLACE INTO settings VALUES (?, ?)", (key, value))
+
+    @property
+    def mentions(self) -> bool:
+        """@ mention (and ping) linked raiders in reports. Off unless an admin turns it on."""
+        return self.get_setting("mentions", "off") == "on"
 
     # --- links -------------------------------------------------------------------------------
 

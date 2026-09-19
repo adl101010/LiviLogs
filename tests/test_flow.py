@@ -128,6 +128,7 @@ def pinged(allowed):
 
 def test_finished_log_posts_headline_and_thread():
     bot, channel = make_bot(FakeWCL(end_offset_s=3600))
+    bot.store.set_setting("mentions", "on")
     bot.store.link(Char("Pumper", "Area 52"), 111, 111)
     bot.store.link(Char("Dyer", "Area 52"), 555, 555)
     post_link(bot, channel)
@@ -175,6 +176,7 @@ def test_without_thread_permission_the_report_goes_in_the_channel():
 
 def test_a_refused_card_is_sent_as_plain_text_instead():
     bot, channel = make_bot(FakeWCL(), FakeChannel(refuse_cards=True))
+    bot.store.set_setting("mentions", "on")
     bot.store.link(Char("Pumper", "Area 52"), 111, 111)
     post_link(bot, channel)
     headline = channel.sent[0]
@@ -225,3 +227,31 @@ def test_other_channels_are_ignored():
     channel.id = 999
     post_link(bot, channel)
     assert channel.sent == [] and bot.store.pending() == []
+
+
+def test_by_default_nobody_is_mentioned_or_pinged():
+    bot, channel = make_bot(FakeWCL())
+    bot.store.link(Char("Pumper", "Area 52"), 111, 111)  # linked, but mentions are off
+    post_link(bot, channel)
+    everything = [channel.sent[0], *channel.thread.sent]
+    assert all(pinged(m.allowed) == [] for m in everything)
+    assert "<@" not in "\n".join(m.content for m in everything)
+    assert "**🏆 Top DPS** - **Pumper** 94.5" in channel.sent[0].content
+    assert "Not linked" not in channel.thread.sent[-1].content  # no nudge to link people nobody will ping
+
+
+def test_settings_command_flips_mentions():
+    from bot.main import MENTION_CHOICES, settings_command
+
+    bot, _ = make_bot(FakeWCL())
+    replies = []
+
+    async def send_message(content=None, **_):
+        replies.append(content)
+
+    interaction = SimpleNamespace(client=bot, response=SimpleNamespace(send_message=send_message))
+    asyncio.run(settings_command.callback(interaction))
+    assert "**Mentions** · **Off**" in replies[-1] and not bot.store.mentions
+    on = next(c for c in MENTION_CHOICES if c.value == "on")
+    asyncio.run(settings_command.callback(interaction, mentions=on))
+    assert "**Mentions** · **On**" in replies[-1] and bot.store.mentions

@@ -138,7 +138,7 @@ class RecapBot(discord.Client):
         self.wcl = WCLClient()
         self.tree = app_commands.CommandTree(self)
         for command in (link_command, link_raid_command, link_member_menu, unlink_command, links_command,
-                        recap_command):
+                        recap_command, settings_command):
             self.tree.add_command(command)
         self._busy: set[ReportRef] = set()
         self._tasks: set[asyncio.Task] = set()  # keeps background checks from being garbage-collected
@@ -282,9 +282,13 @@ class RecapBot(discord.Client):
             keys = {line.chart for line in lines if line.chart}
             charts = await asyncio.to_thread(draw_charts, night, keys, self.config.recap)
         actions = [("👤 My night", f"{MY_NIGHT}:{ref.host}:{ref.code}")] if self.config.my_night else []
+        # /settings mentions: with mentions off (the default) everyone shows as their character name
+        # and nobody is pinged; links still drive My night.
+        mentions = self.store.mentions
         rendered = render_report(
-            night, lines, ref.url, self.store.user_for, self.config.timezone, self.config.thread_ping_everyone,
-            thumbnail=await self.boss_picture(night), charts=charts, actions=actions,
+            night, lines, ref.url, self.store.user_for if mentions else (lambda char: None), self.config.timezone,
+            self.config.thread_ping_everyone, thumbnail=await self.boss_picture(night), charts=charts,
+            actions=actions, nudge_unlinked=mentions,
         )
         return Built(rendered, night, lines)
 
@@ -580,6 +584,30 @@ async def link_member_menu(interaction: discord.Interaction, member: discord.Mem
     view = linking.member_view(member.id, bot.store)
     await interaction.response.send_message(view=view, ephemeral=True, allowed_mentions=NO_PINGS)
     view.stop()
+
+
+MENTION_CHOICES = [
+    app_commands.Choice(name="Off: character names, nobody is pinged", value="off"),
+    app_commands.Choice(name="On: @ mention and ping linked raiders", value="on"),
+]
+
+
+def settings_text(store) -> str:
+    mentions = ("**On**: linked raiders are @ mentioned and pinged" if store.mentions
+                else "**Off**: raiders show as their character name; nobody is pinged")
+    return f"### ⚙️ LiviLogs settings\n**Mentions** · {mentions}\n-# Changes apply from the next report."
+
+
+@app_commands.command(name="settings", description="See or change LiviLogs settings (admins)")
+@app_commands.describe(mentions="@ mention and ping raiders in reports, or just show their character names")
+@app_commands.choices(mentions=MENTION_CHOICES)
+@app_commands.default_permissions(manage_guild=True)
+@app_commands.guild_only()
+async def settings_command(interaction: discord.Interaction, mentions: app_commands.Choice[str] | None = None):
+    bot = _bot(interaction)
+    if mentions is not None:
+        bot.store.set_setting("mentions", mentions.value)
+    await interaction.response.send_message(settings_text(bot.store), ephemeral=True, allowed_mentions=NO_PINGS)
 
 
 @app_commands.command(name="unlink", description="Remove a character link (admins)")

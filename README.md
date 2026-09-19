@@ -1,8 +1,9 @@
 # LiviLogs
 
 A Discord bot for WoW guilds. When a Warcraft Logs link is posted after raid, it reads the whole
-night and posts a report that tags the actual people: a headline card in the logs channel, and the
-full report as a thread of cards under it.
+night and posts a report that calls out the actual people (by character name, or as @ mentions if
+an admin turns them on): a headline card in the logs channel, and the full report as a thread of
+cards under it.
 
 Each card has a coloured edge, dividers between groups of callouts and small print explaining what
 each one means. The headline card carries the boss's picture and a **View log on Warcraft Logs**
@@ -103,9 +104,12 @@ How the numbers work:
   `vanilla.`).
 - Logs must be uploaded as **Public or Unlisted**. Private logs can't be read by bots.
 
-**Pings:** the headline pings everyone it names. In the thread, each person is pinged once, on their
-first mention, and Discord adds them to the thread. Set `THREAD_PING_EVERYONE=false` to stop the
-parse leaderboard from pinging the whole raid; award winners are still pinged.
+**Mentions:** off by default. Everyone shows as their character name in bold and nobody is pinged.
+An admin can turn them on from Discord with `/settings mentions:On` (no restart; it applies from the
+next report). With mentions on, linked raiders are @ mentioned: the headline pings everyone it
+names, and in the thread each person is pinged once, on their first mention, and Discord adds them
+to the thread. `THREAD_PING_EVERYONE=false` then stops the parse leaderboard from pinging the whole
+raid; award winners are still pinged.
 
 ### Updating consumables for a new expansion
 
@@ -138,11 +142,14 @@ is only posted once.
 | `/unlink <character> [realm]` | **Admins.** Remove a link |
 | `/links [member]` | Anyone. Show someone's characters; with no member, list who from the last report isn't linked |
 | `/recap <link>` | Post the report right now, without waiting |
+| `/settings [mentions]` | **Admins.** See the settings, or turn @ mentions on or off: *Off* (the default) shows character names and pings nobody; *On* @ mentions and pings linked raiders |
 | `/recap <link> record_only:True` | Add a past night to history without posting it, so "last raid's best" works from the first real post |
 
-Unlinked characters still appear in the report, in bold, with a nudge at the end of the thread.
+Links are what @ mentions use (when they're on) and what My night uses to find someone's
+characters. With mentions on, unlinked characters appear in bold, with a nudge at the end of the
+thread.
 
-**Who counts as an admin:** Discord shows `/link`, `/link-raid`, `/unlink` and the **Link
+**Who counts as an admin:** Discord shows `/link`, `/link-raid`, `/unlink`, `/settings` and the **Link
 characters** right-click command only to members with the **Manage Server** permission, and refuses
 them from anyone else. To let officers link people without giving them Manage Server, go to Server
 Settings → Integrations → LiviLogs and allow their role on those commands.

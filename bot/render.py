@@ -195,6 +195,7 @@ def render_report(
     thumbnail: str | None = None,
     charts: dict[str, bytes] | None = None,
     actions: list[tuple[str, str]] | None = None,
+    nudge_unlinked: bool = True,
 ) -> Rendered:
     who = _Names(user_for)
     prog = not night.kills
@@ -241,7 +242,7 @@ def render_report(
 
     if thread:
         notes.append("🧵 Full report in the thread")
-    if who.unlinked:
+    if who.unlinked and nudge_unlinked:  # only worth saying when linking means a mention
         nudge = (f"Not linked: {', '.join(c.name for c in who.unlinked)}. "
                  "An admin can link them with /link-raid so the bot can tag them.")
         if thread:

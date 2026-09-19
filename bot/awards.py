@@ -335,7 +335,7 @@ class Builder:
                 for i, r in enumerate(entries):
                     missed = f" ({r.pulls} pulls)" if r.pulls < total_pulls else ""
                     if i == 0:
-                        parts += [r.char, f" **{fmt_rate(r.per_second)}**{missed} 👑"]
+                        parts += ["👑 - ", r.char, f" **{fmt_rate(r.per_second)}**{missed}"]
                     else:
                         parts += ["\n" if i == 1 else " · ", r.char, f" {fmt_rate(r.per_second)}{missed}"]
             if entries:

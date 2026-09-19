@@ -74,6 +74,7 @@ def test_guild_prog_night():
     assert "reached P3 on 10 of 18 pulls" in text
     assert "(6 pulls)" in text and "(12 pulls)" in text  # people who sat out, not made to look bad
     assert "38 interrupts (next best: 21)" in text
+    assert "**💚 Healing**\n👑 - **P-7985a3** **268k**\n" in text  # the crown leads the top line
     assert "9 battle rezzes" in text
     assert "died to Necrotic Vapors 6 times" in text
     assert " · spent 12m 22s dead" in text  # ghost

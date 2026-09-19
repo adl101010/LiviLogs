@@ -58,11 +58,12 @@ def anonymise(report: dict) -> dict:
 
     # Consumables: keep only what the bot reads. The generic trim above would drop the casts
     # table's per-player "sources", and each combatantInfo snapshot carries full gear and talents.
-    # Gear keeps only what the gear check reads: item, enchanted or not, gems, bonus ids.
+    # Gear keeps only what the bot reads: item, enchant, weapon oil, gems, bonus ids.
     snapshots = [
         {"type": e.get("type"), "fight": e.get("fight"), "sourceID": e.get("sourceID"), "specID": e.get("specID"),
          "auras": [{"name": a.get("name"), "ability": a.get("ability")} for a in e.get("auras") or []],
          "gear": [{"id": g.get("id"), "permanentEnchant": g.get("permanentEnchant"),
+                   "temporaryEnchant": g.get("temporaryEnchant"),
                    "bonusIDs": g.get("bonusIDs") or [], "gems": [{"id": x.get("id")} for x in g.get("gems") or []]}
                   for g in e.get("gear") or []]}
         for e in report.pop("combatantInfo", None) or []

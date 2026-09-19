@@ -3,6 +3,7 @@
 Built from the same Night the report was, so its numbers always match the report's.
 """
 
+import statistics
 from collections import Counter
 
 from .awards import Line, consumable_rows, fmt_big, fmt_rate, fmt_seconds, parse_colour, plural, times
@@ -90,8 +91,10 @@ def _consumables(night: Night, char: Char, settings: RecapSettings) -> str | Non
         return f"⚠️ {label} {value}" if flag and flag in row.flags else f"{label} {value}"
 
     items = [item("Flask", f"{row.flask}/{row.snapshots}", "no_flask"),
-             item("Food", f"{row.food}/{row.snapshots}", "no_food"),
-             item("Healthstones", str(row.health_items), "healthstone_bag")]
+             item("Food", f"{row.food}/{row.snapshots}", "no_food")]
+    if row.oil_pulls:
+        items.append(item("Weapon oil", f"{row.oil}/{row.oil_pulls}", "no_oil"))
+    items.append(item("Healthstones", str(row.health_items), "healthstone_bag"))
     if row.vantus_pulls:
         items.append(item("Vantus", f"{row.vantus}/{row.vantus_pulls}", "no_vantus"))
     if row.rune:
@@ -108,7 +111,7 @@ def _consumables(night: Night, char: Char, settings: RecapSettings) -> str | Non
     text += "\n" + ("⚠️ " if "hoarder" in row.flags else "") + f"**Potions** · {potions}"
     text += "\n" + _potion_dots(night, char, row.role == HEALER)
     note = "🟢 one potion · 🟣 two or more · ⚫ none, one dot per pull in order"
-    if any(f in row.flags for f in ("no_flask", "no_food", "hoarder", "healthstone_bag", "no_vantus")):
+    if any(f in row.flags for f in ("no_flask", "no_food", "no_oil", "hoarder", "healthstone_bag", "no_vantus")):
         note += " · ⚠️ = the report called it out"
     return text + f"\n-# {note}"
 
@@ -148,6 +151,9 @@ def _gear(night: Night, char: Char, settings: RecapSettings) -> str | None:
 
 def _extras(night: Night, char: Char) -> str | None:
     parts = []
+    if char in night.active:
+        usual = statistics.median(night.active.values())
+        parts.append(f"⏱️ active {night.active[char] * 100:.0f}% of your time alive (raid: {usual * 100:.0f}%)")
     if night.damage_done.get(char):
         parts.append(f"⚔️ {fmt_big(night.damage_done[char])} damage")
     if night.damage_taken.get(char):

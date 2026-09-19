@@ -45,16 +45,16 @@ The thread has seven sections, each its own card, posted only if it has somethin
 | 🗺️ The night | Every boss: kills, pulls, best wipe. A boss-health bar per pull on long progression bosses, time on bosses, 💔 Heartbreaker (closest wipe before a kill), 🧱 Wall of the night, ☠️ Raid's nemesis, 🧨 Wipe starter |
 | 📊 Parses | Everyone's night average by role, in WCL's colours, 👑 on top. On a night with no kills: raw DPS/HPS instead (wipes don't get parses) |
 | 🌟 Highlights | 🩷 Pink parse, 🎵 Metronome, 🦶 Kick captain, 🧼 Dispel machine, 🪄 Necromancer, 💜 PI's favorite (who got Power Infusion from someone else the most), 🧍 Last one standing |
-| 🤡 Lowlights | 🚽 Parse of shame, 🎢 Rollercoaster, ⚔️ Battle healer, 🧽 Damage sponge, 🛡️ Outdamaged by a tank |
+| 🤡 Lowlights | 🚽 Parse of shame, 🎢 Rollercoaster, ⚔️ Battle healer, 🧽 Damage sponge, 🛡️ Outdamaged by a tank, 💤 Idle (DPS and tanks well under the raid's usual active time) |
 | 💀 Deaths | 💀 Floor inspector, 🐤 Canary, 🎁 Couldn't wait for loot, 🎯 Nemesis, 🧲 Brez magnet, 👻 Ghost (most time spent dead, 3 minutes or more), ⏱️ Speedrunner |
-| 🧪 Consumables | 🔮 Tryhards (Void-Touched rune), 🍺 Potion seller, 🫗 Mana chugger, 🍪 Cookie monster, 🧪 Potion hoarders, 🪦 Died with a healthstone in the bag, ⚗️ No flask, 🍗 Forgot to eat, 📜 No vantus. Retail only |
+| 🧪 Consumables | 🔮 Tryhards (Void-Touched rune), 🍺 Potion seller, 🫗 Mana chugger, 🍪 Cookie monster, 🧪 Potion hoarders, 🪦 Died with a healthstone in the bag, ⚗️ No flask, 🍗 Forgot to eat, 🛢️ No weapon oil, 📜 No vantus. Retail only |
 | 🛠️ Gear check | A chart of every raider's enchants and gems, then 🔧 Missing enchants, 🎁 Unwrapped loot (new piece worn unenchanted), 💎 Empty sockets. Retail only |
 
 **Charts.** Four parts of the thread are pictures the bot draws:
 
 - **Parses:** a grid of everyone's parse on every kill, in WCL's colours, with the night's average
   at the end. Replaces the leaderboard text.
-- **Consumables:** one row per raider (flask, food, pulls potted, potions used, healthstones,
+- **Consumables:** one row per raider (flask, food, weapon oil, pulls potted, potions used, healthstones,
   vantus, rune). Yellow marks what would have been called out, by the same rules as the callouts.
   *Pulls potted* is pulls with at least one potion, out of pulls they were in; *potions used* is
   every potion drunk, so someone who drinks two on a long fight shows 18/18 and 23. For healers,
@@ -87,6 +87,13 @@ How the numbers work:
 - **Progression nights** (no kills) swap parses for raw DPS/HPS, divided by the time each person was
   actually in pulls; anyone who sat some out gets a "(6 pulls)" note instead of a bad number. The
   headline shows the best pull and how it compares with last raid's.
+- **Idle** is each DPS and tank's WCL "active time" (time spent dealing damage) over their time
+  alive in boss pulls. Anyone 10 or more points under the raid's median is called out (up to 3).
+  It's compared with the raid rather than a fixed bar because movement-heavy prog wipes pull
+  everyone down together. Healers are left out: WCL counts heals over time and shields ticking
+  as healing, so every healer reads near 100%.
+- **Weapon oil** is read from the main hand in each pull's gear snapshot: oils, sharpening stones
+  and shaman imbues all count. Missing it on 2+ pulls is called out, like flask and food.
 - **Deaths** count every boss pull, kills and wipes, but only the first 5 deaths of each pull: people
   who die after the wipe is called don't get blamed. Ties are included unless it's a pile-up.
 - **History:** the bot remembers every night it posts, so progression bosses can say "last raid's

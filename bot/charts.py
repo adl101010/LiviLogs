@@ -216,14 +216,17 @@ def potions_used(row: ConsumableRow) -> tuple[str, str]:
     return str(row.combat_potions), "plain" if row.combat_potions else "dim"
 
 
-def _consumable_cells(row: ConsumableRow, show_vantus: bool, show_rune: bool) -> list[tuple[str, str]]:
+def _consumable_cells(row: ConsumableRow, show_vantus: bool, show_rune: bool,
+                      show_oil: bool = False) -> list[tuple[str, str]]:
     """(text, style) per column. Styles: ok, warn, star, dim, plain."""
     def fraction(have: int, total: int, flag: str) -> tuple[str, str]:
         style = "warn" if flag in row.flags else "ok" if have == total else "plain"
         return f"{have}/{total}", style
 
-    cells = [fraction(row.flask, row.snapshots, "no_flask"), fraction(row.food, row.snapshots, "no_food"),
-             fraction(row.potted, row.pulls, "hoarder"), potions_used(row)]
+    cells = [fraction(row.flask, row.snapshots, "no_flask"), fraction(row.food, row.snapshots, "no_food")]
+    if show_oil:
+        cells.append(fraction(row.oil, row.oil_pulls, "no_oil") if row.oil_pulls else ("–", "dim"))
+    cells += [fraction(row.potted, row.pulls, "hoarder"), potions_used(row)]
     cells.append((str(row.health_items),
                   "warn" if "healthstone_bag" in row.flags else "plain" if row.health_items else "dim"))
     if show_vantus:
@@ -243,8 +246,11 @@ def consumables_chart(night: Night, settings: RecapSettings) -> bytes | None:
         return None
     show_vantus = any(r.vantus_pulls for r in rows)
     show_rune = bool(settings.tryhard_runes)
-    columns = [("Flask", 76), ("Food", 76), ("Pulls potted", 76), ("Potions used", 96),
-               ("Healthstone / potion", 76)]
+    show_oil = any(r.oil_pulls for r in rows)  # needs gear snapshots
+    columns = [("Flask", 76), ("Food", 76)]
+    if show_oil:
+        columns.append(("Weapon oil", 76))
+    columns += [("Pulls potted", 76), ("Potions used", 96), ("Healthstone / potion", 76)]
     if show_vantus:
         columns.append(("Vantus", 76))
     if show_rune:
@@ -266,7 +272,7 @@ def consumables_chart(night: Night, settings: RecapSettings) -> bytes | None:
     height = top + header_h + len(groups) * 22 + len(rows) * (cell_h + gap) + 44 + 17 * len(notes)
 
     canvas = Canvas(width, height)
-    _header(canvas, "Consumables", "flask, food, vantus and rune: pulls they had it on, out of pulls they were in")
+    _header(canvas, "Consumables", "flask, food, oil, vantus and rune: pulls they had it on, out of pulls they were in")
     x0 = left + name_w
     for (name, cell_w), start in zip(columns, starts):
         wrapped = wrap(name, cell_w, 10)
@@ -282,7 +288,7 @@ def consumables_chart(night: Night, settings: RecapSettings) -> bytes | None:
         y += 22
         for row in members:
             canvas.text(left, y + cell_h / 2, row.char.name, 13, TEXT, anchor="lm")
-            cells = _consumable_cells(row, show_vantus, show_rune)
+            cells = _consumable_cells(row, show_vantus, show_rune, show_oil)
             for (text, style), (_, cell_w), start in zip(cells, columns, starts):
                 x = x0 + start
                 background, colour = fills[style]

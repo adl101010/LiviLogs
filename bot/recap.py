@@ -171,6 +171,7 @@ class Night:
     mana_by_pull: dict[Char, Counter] = field(default_factory=dict)  # mana potions: pull -> how many (if known)
     gear_at_pull: dict[int, dict[Char, list["Item | None"]]] = field(default_factory=dict)  # pull -> player -> slots
     specs: dict[Char, int] = field(default_factory=dict)  # WoW spec id
+    active: dict[Char, float] = field(default_factory=dict)  # share of time alive in pulls spent acting
 
     @property
     def has_parses(self) -> bool:
@@ -343,6 +344,27 @@ def _by_player(report: dict, key: str, players: dict[int, Char]) -> dict[Char, f
     return totals
 
 
+def _active_share(report: dict, players: dict[int, Char], roles: dict[Char, str],
+                  pulls_in: dict[Char, set[int]], pulls: list, dead: Counter) -> dict[Char, float]:
+    """How much of their time alive in boss pulls each DPS and tank was actually dealing damage:
+    WCL's active time over time in pulls minus time dead. 0.9 = active 90% of the time.
+
+    Healers are left out: WCL counts heals over time and shields ticking as healing activity, so
+    every healer comes out near 100% however much they cast. Anyone alive under a minute is too."""
+    busy: dict[Char, float] = {}
+    for e in _table_entries(report, "damageDone"):
+        char = players.get(e.get("id"))
+        if char and isinstance(e.get("activeTime"), (int, float)):
+            busy[char] = busy.get(char, 0) + e["activeTime"]
+    length = {p.id: (p.end - p.start) for p in pulls}
+    share = {}
+    for char, ids in pulls_in.items():
+        alive = sum(length.get(i, 0) for i in ids) - dead.get(char, 0) * 1000
+        if roles.get(char) != HEALER and char in busy and alive >= 60_000:
+            share[char] = min(1.0, busy[char] / alive)
+    return share
+
+
 def _cast_tally(report: dict, key: str, players: dict[int, Char]) -> Counter:
     """Interrupts and dispels: nested per interrupted/dispelled spell, then per player."""
     tally: Counter = Counter()
@@ -441,6 +463,7 @@ class Item:
     enchanted: bool
     gems: int
     bonus_ids: frozenset[int]
+    oiled: bool = False  # a temporary enchant: weapon oil, sharpening stone, shaman imbue
 
 
 def _gear_at_pull(report: dict, players: dict[int, Char],
@@ -461,7 +484,8 @@ def _gear_at_pull(report: dict, players: dict[int, Char],
             continue
         out[e["fight"]][char] = [
             Item(it["id"], bool(it.get("permanentEnchant")), len(it.get("gems") or []),
-                 frozenset(b for b in it.get("bonusIDs") or [] if isinstance(b, int)))
+                 frozenset(b for b in it.get("bonusIDs") or [] if isinstance(b, int)),
+                 bool(it.get("temporaryEnchant")))
             if isinstance(it, dict) and it.get("id") else None
             for it in gear
         ]
@@ -606,6 +630,7 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
     health, mana = _consumable_casts(report, players, settings.extra_health_items)
     mana_by_pull = _mana_potions(report, players, pull_ids)
     gear_at_pull, specs = _gear_at_pull(report, players, pull_ids)
+    dead_seconds = _time_dead(report, players, pulls, deaths)
     if mana_by_pull is not None:  # the per-pull casts are the same count, limited to boss pulls
         mana = Counter({c: sum(n.values()) for c, n in mana_by_pull.items()})
 
@@ -647,10 +672,11 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
         casts_known="casts" in report,
         health_items=health,
         mana_potions=mana,
-        dead_seconds=_time_dead(report, players, pulls, deaths),
+        dead_seconds=dead_seconds,
         power_infusion=_power_infusion(report, players, pull_ids),
         potions_by_pull=potions_by_pull,
         mana_by_pull=mana_by_pull or {},
         gear_at_pull=gear_at_pull,
         specs=specs,
+        active=_active_share(report, players, roles, pulls_in, pulls, dead_seconds),
     )

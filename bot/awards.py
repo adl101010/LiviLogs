@@ -7,6 +7,7 @@ rather than names; the renderer turns those into Discord mentions and decides ho
 """
 
 import math
+import statistics
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import Protocol
@@ -159,6 +160,8 @@ def parse_colour(pct: float) -> str:
 
 ROLE_EMOJI = {DPS: "⚔️", HEALER: "💚", TANK: "🛡️"}
 ROLE_NAMES = {DPS: "Damage", HEALER: "Healing", TANK: "Tanks"}
+IDLE_GAP = 0.10  # 10 points under the raid's usual active time
+IDLE_MIN_RAIDERS = 5  # too few DPS and tanks to say what's usual
 PHASE_BARS = "▁▂▃▄▅▆▇█"
 
 
@@ -466,6 +469,22 @@ class Builder:
                 self.add(LOWLIGHTS, [*joined(beaten), " did less damage than ", tank], "outdamaged", beaten,
                          title="🛡️ Outdamaged by a tank")
 
+        # Idle: DPS and tanks well under the raid's own usual active time. Compared with the raid
+        # rather than a fixed bar, because movement-heavy prog wipes pull everyone down together.
+        if len(night.active) >= IDLE_MIN_RAIDERS:
+            usual = statistics.median(night.active.values())
+            idle = sorted((c for c, share in night.active.items() if share <= usual - IDLE_GAP),
+                          key=lambda c: (night.active[c], c.name.casefold()))[:3]
+            if idle:
+                parts = []
+                for i, c in enumerate(idle):
+                    if i:
+                        parts.append(" · ")
+                    parts += [c, f" {night.active[c] * 100:.0f}%"]
+                self.add(LOWLIGHTS, parts, "idle", idle, title="💤 Idle",
+                         note=f"Time alive in pulls spent dealing damage; the raid's usual is {usual * 100:.0f}%",
+                         stacked=True)
+
     # --- deaths --------------------------------------------------------------------------------
 
     def deaths(self) -> None:
@@ -691,6 +710,19 @@ class Builder:
                     parts += [c, " " + of(gaps[c], snapshots[c], first=i == 0)]
                 self.add(CONSUMABLES, parts, key, offenders, title=title, cluster="prep", chart="consumables")
 
+        # No weapon oil: read from the main hand in each pull's gear snapshot (oils, sharpening
+        # stones and shaman imbues are all temporary enchants), by the flask and food rule.
+        unoiled = sorted((r for r in consumable_rows(night, self.settings) if "no_oil" in r.flags),
+                         key=lambda r: (-(r.oil_pulls - r.oil), r.char.name.casefold()))
+        if unoiled:
+            parts = []
+            for i, r in enumerate(unoiled):
+                if i:
+                    parts.append(" · ")
+                parts += [r.char, " " + of(r.oil_pulls - r.oil, r.oil_pulls, first=i == 0)]
+            self.add(CONSUMABLES, parts, "no_oil", [r.char for r in unoiled], title="🛢️ No weapon oil",
+                     cluster="prep", chart="consumables")
+
         # No vantus: only pulls where at least half the raid had one, so skipping it on farm
         # bosses is never called out.
         vantus_pulls: Counter = Counter()
@@ -746,9 +778,12 @@ class ConsumableRow:
     health_items: int
     vantus: int  # of vantus_pulls
     vantus_pulls: int  # pulls where most of the raid had a vantus rune
-    flags: set[str] = field(default_factory=set)  # tryhard, hoarder, healthstone_bag, no_flask, no_food, no_vantus
+    flags: set[str] = field(default_factory=set)  # tryhard, hoarder, healthstone_bag, no_flask, no_food,
+    # no_oil, no_vantus
     combat_potions: int = 0  # every combat potion drunk
     potted: int = 0  # "pulls potted": pulls with at least one potion (for healers, a mana potion counts)
+    oil: int = 0  # pulls with a weapon oil (or stone, or shaman imbue) on the main hand
+    oil_pulls: int = 0  # pulls with a main-hand weapon in the log's gear snapshot
 
 
 def consumable_rows(night: Night, settings: RecapSettings) -> list[ConsumableRow]:
@@ -780,8 +815,17 @@ def consumable_rows(night: Night, settings: RecapSettings) -> list[ConsumableRow
             if vantus_pull:
                 row.vantus_pulls += 1
                 row.vantus += char in has_vantus
+    for players in night.gear_at_pull.values():
+        for char, gear in players.items():
+            row = rows.get(char)
+            weapon = gear[15] if row and len(gear) > 15 else None  # 15 = main hand
+            if weapon:
+                row.oil_pulls += 1
+                row.oil += weapon.oiled
     counted = Counter(d.char for ds in night.counted.values() for d in ds)
     for row in rows.values():
+        if row.oil_pulls - row.oil >= 2:
+            row.flags.add("no_oil")
         if runes and row.rune and row.rune * 2 >= row.snapshots:
             row.flags.add("tryhard")
         if row.pulls >= 3:

@@ -47,6 +47,15 @@ PARSE_BANDS = [
     (25, (30, 255, 0)),
     (0, (157, 157, 157)),
 ]
+# WoW's class colours: how raiders expect to see each other's names.
+CLASS_COLOURS = {
+    "deathknight": (196, 30, 58), "demonhunter": (163, 48, 201), "druid": (255, 124, 10),
+    "evoker": (51, 147, 127), "hunter": (170, 211, 114), "mage": (63, 199, 235),
+    "monk": (0, 255, 152), "paladin": (244, 140, 186), "priest": (255, 255, 255),
+    "rogue": (255, 244, 104), "shaman": (46, 134, 232),  # shaman lifted a little to read on dark
+    "warlock": (135, 136, 238),
+    "warrior": (198, 155, 109),
+}
 PHASE_COLOURS = [(109, 111, 120), (74, 155, 255), (192, 124, 245), (255, 128, 0), (226, 104, 168)]
 ROLE_ORDER = [(TANK, "TANKS"), (HEALER, "HEALERS"), (DPS, "DAMAGE")]
 DIFFICULTY = {1: "LFR", 3: "Normal", 4: "Heroic", 5: "Mythic"}
@@ -69,6 +78,12 @@ def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.Im
         except OSError:
             continue
     return ImageFont.load_default(size * SCALE)
+
+
+def name_colour(night: Night, char) -> tuple[int, int, int]:
+    """A raider's name in their class colour; plain text if the log doesn't say their class."""
+    wow_class = (night.classes.get(char) or "").replace(" ", "").casefold()
+    return CLASS_COLOURS.get(wow_class, TEXT)
 
 
 def parse_colour(pct: float) -> tuple[int, int, int]:
@@ -179,7 +194,7 @@ def parse_chart(night: Night) -> bytes | None:
         canvas.text(left, y + 6, label, 10, FAINT, bold=True)
         y += 22
         for p in lines:
-            canvas.text(left, y + cell_h / 2, p.char.name, 13, TEXT, anchor="lm")
+            canvas.text(left, y + cell_h / 2, p.char.name, 13, name_colour(night, p.char), anchor="lm")
             by_boss: dict[str, list[float]] = {}
             for pct, boss in p.parses:
                 by_boss.setdefault(boss, []).append(pct)
@@ -287,7 +302,7 @@ def consumables_chart(night: Night, settings: RecapSettings) -> bytes | None:
         canvas.text(left, y + 6, label, 10, FAINT, bold=True)
         y += 22
         for row in members:
-            canvas.text(left, y + cell_h / 2, row.char.name, 13, TEXT, anchor="lm")
+            canvas.text(left, y + cell_h / 2, row.char.name, 13, name_colour(night, row.char), anchor="lm")
             cells = _consumable_cells(row, show_vantus, show_rune, show_oil)
             for (text, style), (_, cell_w), start in zip(cells, columns, starts):
                 x = x0 + start
@@ -379,7 +394,7 @@ def gear_chart(night: Night, settings: RecapSettings) -> bytes | None:
         canvas.text(left, y + 6, label, 10, FAINT, bold=True)
         y += 22
         for row in members:
-            canvas.text(left, y + cell_h / 2, row.char.name, 13, TEXT, anchor="lm")
+            canvas.text(left, y + cell_h / 2, row.char.name, 13, name_colour(night, row.char), anchor="lm")
             for i, (_, checks) in enumerate(row.columns):
                 x = x0 + i * (cell_w + gap)
                 if not checks:

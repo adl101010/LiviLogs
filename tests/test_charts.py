@@ -133,3 +133,18 @@ def test_healer_with_both_kinds_of_potion():
     healz = next(r for r in consumable_rows(night, SETTINGS) if r.char.name == "Healz")
     healz.combat_potions = 3
     assert potions_used(healz) == ("3 + 4 mana", "plain")
+
+
+def test_names_are_drawn_in_class_colours():
+    from bot.charts import CLASS_COLOURS, name_colour
+
+    from bot.recap import Char
+
+    night = load("gear_night")
+    # Every raider's class is read from the log, and each one has a colour.
+    assert len(night.classes) == len(night.roster)
+    assert all((c or "").casefold() in CLASS_COLOURS for c in night.classes.values())
+    a_hunter = next(c for c in night.roster if night.classes.get(c) == "Hunter")
+    assert name_colour(night, a_hunter) == CLASS_COLOURS["hunter"]
+    # Someone the log doesn't give a class for keeps the plain text colour.
+    assert name_colour(night, Char("Nobody", "Nowhere")) == (219, 222, 225)

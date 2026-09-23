@@ -50,7 +50,8 @@ The thread has seven sections, each its own card, posted only if it has somethin
 | 🧪 Consumables | 🔮 Tryhards (Void-Touched rune), 🍺 Potion seller, 🫗 Mana chugger, 🍪 Cookie monster, 🧪 Potion hoarders, 🪦 Died with a healthstone in the bag, ⚗️ No flask, 🍗 Forgot to eat, 🛢️ No weapon oil, 📜 No vantus, ⌛ Ran out mid-pull (flask or food expired during a pull; weapon oil that ran out between pulls). Retail only |
 | 🛠️ Gear check | A chart of every raider's enchants and gems, then 🔧 Missing enchants, 🎁 Unwrapped loot (new piece worn unenchanted), 💎 Empty sockets. Retail only |
 
-**Charts.** Four parts of the thread are pictures the bot draws:
+**Charts.** Four parts of the thread are pictures the bot draws. In the three grids, names are
+in their class colour (shaman blue lifted a little so it reads on the dark background):
 
 - **Parses:** a grid of everyone's parse on every kill, in WCL's colours, with the night's average
   at the end. Replaces the leaderboard text.

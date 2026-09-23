@@ -177,6 +177,7 @@ class Night:
     infusions: list["Infusion"] = field(default_factory=list)  # every Power Infusion, with its window
     pi_overwritten: list["Overwritten"] = field(default_factory=list)  # PI replaced by another priest's
     dungeons: list[str] = field(default_factory=list)  # dungeon runs in the same log, left out of the report
+    classes: dict[Char, str] = field(default_factory=dict)  # WoW class, for colouring names ("DeathKnight")
 
     @property
     def has_parses(self) -> bool:
@@ -278,6 +279,16 @@ def _bosses(pulls: list[Pull]) -> list[Boss]:
     for p in pulls:
         grouped.setdefault((p.encounter_id, p.difficulty), []).append(p)
     return [Boss(eid, ps[0].boss, diff, ps) for (eid, diff), ps in grouped.items()]
+
+
+def _classes(report: dict, players: dict[int, Char]) -> dict[Char, str]:
+    """Each raider's class, as WCL spells it ("DeathKnight", "DemonHunter")."""
+    out = {}
+    for a in ((report.get("masterData") or {}).get("actors")) or []:
+        char = players.get(a.get("id"))
+        if char and a.get("subType"):
+            out[char] = a["subType"]
+    return out
 
 
 def _players(report: dict, pulls: list[Pull]) -> dict[int, Char]:
@@ -781,6 +792,7 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
         title=report.get("title") or "Raid",
         zone=_zone(report, raid_fights(report)),
         dungeons=_dungeons(report),
+        classes=_classes(report, players),
         start_ms=int(report.get("startTime") or 0),
         processing=(report.get("exportedSegments") or 0) < (report.get("segments") or 0),
         pulls=pulls,

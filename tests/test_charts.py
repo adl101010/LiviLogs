@@ -144,7 +144,18 @@ def test_names_are_drawn_in_class_colours():
     # Every raider's class is read from the log, and each one has a colour.
     assert len(night.classes) == len(night.roster)
     assert all((c or "").casefold() in CLASS_COLOURS for c in night.classes.values())
-    a_hunter = next(c for c in night.roster if night.classes.get(c) == "Hunter")
+    a_hunter = next(c for c in night.roster if night.class_of(c) == "Hunter")
     assert name_colour(night, a_hunter) == CLASS_COLOURS["hunter"]
     # Someone the log doesn't give a class for keeps the plain text colour.
     assert name_colour(night, Char("Nobody", "Nowhere")) == (219, 222, 225)
+
+
+def test_class_colours_survive_wcls_two_spellings_of_a_realm():
+    from bot.charts import name_colour
+
+    # WCL writes "Area 52" in the rankings and "Area52" in the actor list, in the same log. Every
+    # name on the parse grid still gets its class colour.
+    night = load("mixed_night")
+    plain = [p.char.name for p in night.parses if name_colour(night, p.char) == (219, 222, 225)]
+    assert plain == []
+    assert len({p.char.realm for p in night.parses}) > 1  # a cross-realm raid, spelled both ways

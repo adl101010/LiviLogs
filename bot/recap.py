@@ -177,7 +177,13 @@ class Night:
     infusions: list["Infusion"] = field(default_factory=list)  # every Power Infusion, with its window
     pi_overwritten: list["Overwritten"] = field(default_factory=list)  # PI replaced by another priest's
     dungeons: list[str] = field(default_factory=list)  # dungeon runs in the same log, left out of the report
-    classes: dict[Char, str] = field(default_factory=dict)  # WoW class, for colouring names ("DeathKnight")
+    # WoW class per player, for colouring names. Keyed by Char.key: WCL spells realms both ways
+    # in one log ("Area 52" in the rankings, "Area52" in the actor list).
+    classes: dict[tuple[str, str], str] = field(default_factory=dict)
+
+    def class_of(self, char: Char) -> str | None:
+        """Their WoW class, however the realm happens to be spelled."""
+        return self.classes.get(char.key)
 
     @property
     def has_parses(self) -> bool:
@@ -281,13 +287,13 @@ def _bosses(pulls: list[Pull]) -> list[Boss]:
     return [Boss(eid, ps[0].boss, diff, ps) for (eid, diff), ps in grouped.items()]
 
 
-def _classes(report: dict, players: dict[int, Char]) -> dict[Char, str]:
-    """Each raider's class, as WCL spells it ("DeathKnight", "DemonHunter")."""
+def _classes(report: dict, players: dict[int, Char]) -> dict[tuple[str, str], str]:
+    """Each raider's class, as WCL spells it ("DeathKnight", "DemonHunter"), by normalised name."""
     out = {}
     for a in ((report.get("masterData") or {}).get("actors")) or []:
         char = players.get(a.get("id"))
         if char and a.get("subType"):
-            out[char] = a["subType"]
+            out[char.key] = a["subType"]
     return out
 
 

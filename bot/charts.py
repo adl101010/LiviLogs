@@ -82,7 +82,7 @@ def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont | ImageFont.Im
 
 def name_colour(night: Night, char) -> tuple[int, int, int]:
     """A raider's name in their class colour; plain text if the log doesn't say their class."""
-    wow_class = (night.classes.get(char) or "").replace(" ", "").casefold()
+    wow_class = (night.class_of(char) or "").replace(" ", "").casefold()
     return CLASS_COLOURS.get(wow_class, TEXT)
 
 

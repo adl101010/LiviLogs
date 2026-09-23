@@ -12,6 +12,8 @@ import hashlib
 import json
 import sys
 
+from bot.recap import norm_realm
+
 _TRIM = {"abilities", "damageAbilities", "targets", "gear", "talents", "pets", "sources", "combatantInfo",
          "talentTree", "events", "missedCasts"}
 
@@ -96,7 +98,12 @@ def anonymise(report: dict) -> dict:
     for name in sorted(names, key=lambda n: (-len(n), n)):
         text = text.replace(json.dumps(name, ensure_ascii=False), stable("P-", name, 6))
     for realm in sorted(realms, key=lambda r: (-len(r), r)):
-        text = text.replace(json.dumps(realm, ensure_ascii=False), stable("Realm-", realm, 4))
+        # WCL spells one realm both ways in the same log ("Area 52" in the rankings, "Area52" in
+        # the actor list). Both get the same placeholder, spelled the same two ways, so fixtures
+        # keep that quirk and the bot's realm matching stays tested.
+        tag = hashlib.sha256(norm_realm(realm).encode()).hexdigest()[:4]
+        placeholder = f"Realm {tag}" if " " in realm else f"Realm-{tag}"
+        text = text.replace(json.dumps(realm, ensure_ascii=False), json.dumps(placeholder))
     report = json.loads(text)
     report["title"] = "Anonymised"
     report["code"] = "Fixture000000000"

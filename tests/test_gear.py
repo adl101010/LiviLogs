@@ -182,3 +182,20 @@ def test_my_night_has_a_gear_line():
         card_text(my_night_card(n, lines, ready.char, SETTINGS, "u"))
     new = next(r for r in rows if r.unwrapped)
     assert "⚠️ new boots unenchanted for 11 pulls" in card_text(my_night_card(n, lines, new.char, SETTINGS, "u"))
+
+
+def test_every_socket_bonus_id_really_grants_a_socket():
+    """A bonus id earns its place only if no wearer of it ever goes ungemmed.
+
+    13454 was on the list and accused three raiders in a real log of an empty socket; every gemmed
+    item carrying it also carried 13695, so it grants nothing. This is that check, over real gear.
+    """
+    for name in ("mixed_night", "two_difficulties", "gear_night"):
+        data = json.loads((Path(__file__).parent / "fixtures" / f"{name}.json").read_text(encoding="utf-8"))
+        n = analyze(data, SETTINGS)
+        for pull in n.gear_at_pull.values():
+            for items in pull.values():
+                for item in items:
+                    if item and not item.gems:
+                        assert not item.bonus_ids & set(SETTINGS.socket_bonus_ids), \
+                            (name, item.bonus_ids & set(SETTINGS.socket_bonus_ids))

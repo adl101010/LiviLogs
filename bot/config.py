@@ -86,8 +86,11 @@ class RecapSettings:
     tryhard_runes: tuple[str, ...] = ("Void-Touched",)
     extra_health_items: tuple[str, ...] = ()
     # Item bonus ids that mean "this item has a socket" (Midnight's). WCL lists the gems in an item
-    # but not its sockets, so an item with one of these and no gem has an empty socket.
-    socket_bonus_ids: tuple[int, ...] = (13668, 13695, 13454, 12833, 13987)
+    # but not its sockets, so an item with one of these and no gem has an empty socket. Only ids
+    # that earn it belong here: one that appears on gemmed copies of an item and never on an
+    # ungemmed copy of the same item. 13454 sat here and accused three raiders of an empty socket
+    # in a real log; every gemmed item carrying it also carried 13695, so it grants no socket.
+    socket_bonus_ids: tuple[int, ...] = (13668, 13695, 13987)
 
     @classmethod
     def from_env(cls) -> "RecapSettings":

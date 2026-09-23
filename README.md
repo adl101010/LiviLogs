@@ -155,8 +155,10 @@ pattern ("Healthstone", "Health Potion", "Healing Potion", "Mana Potion", "Flask
 new names, run the probe on a fresh log and look at the potions people actually used.
 
 The gear check's enchantable slots are Midnight's. `SOCKET_BONUS_IDS` lists the item bonus ids that
-mean "has a socket"; a new expansion may add new ones (look for bonus ids that only ever appear on
-items with gems in them).
+mean "has a socket"; a new expansion may add new ones. To earn a place on that list an id has to
+appear on gemmed copies of an item and never on an ungemmed copy of the *same* item — "it usually
+turns up on gemmed gear" isn't enough, and an id that doesn't grant a socket accuses people of an
+empty one.
 
 ## How it decides when to post
 

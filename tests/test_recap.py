@@ -394,17 +394,52 @@ def test_time_dead_has_seconds():
     assert [fmt_seconds(s) for s in (45, 60, 526.98, 3735)] == ["45s", "1m 00s", "8m 47s", "1h 02m 15s"]
 
 
-def test_power_infusion_lists_everyone_most_to_least():
+def test_power_infusion_lists_each_priests_targets():
     data = report()
     # Healz already infused Pumper 4 times; add two more targets, one of them from a second priest.
-    data["powerInfusion"] += [{"type": "applybuff", "sourceID": 2, "targetID": 6, "fight": f} for f in (1, 2, 3, 5, 6, 6)]
+    data["powerInfusion"] += [{"type": "applybuff", "sourceID": 2, "targetID": 6, "fight": f}
+                              for f in (1, 2, 3, 5, 6, 6)]
     data["powerInfusion"] += [{"type": "applybuff", "sourceID": 1, "targetID": 5, "fight": f} for f in (1, 2)]
     text = all_text(full_text(data))
-    assert "**💜 Power Infusion**\n-# Who got it, most to least\n" in text
-    assert "**Middling** 6 (from **Healz**) · **Pumper** 4 (from **Healz**) · **Dyer** 2 (from **Tanky**)" in text
+    assert "**💜 Power Infusion**\n-# Who each priest infused, most to least\n" in text
+    # A line per priest, the busier one first, with each one's targets most to least.
+    assert "**Healz** · **Middling** 6 · **Pumper** 4\n**Tanky** · **Dyer** 2" in text
 
 
 def test_a_priest_topping_up_one_person_isnt_listed():
     data = report()
     data["powerInfusion"] = data["powerInfusion"][:2]  # twice, on one target: not a pattern
     assert "Power Infusion" not in all_text(full_text(data))
+
+
+def _pi(source, target, start, end=None, fight=6):
+    """A Power Infusion landing, and coming off 15 s later unless told otherwise."""
+    at = [{"type": "applybuff", "sourceID": source, "targetID": target, "fight": fight, "timestamp": start}]
+    return at + [{"type": "removebuff", "sourceID": source, "targetID": target, "fight": fight,
+                  "timestamp": end or start + 15_000}]
+
+
+def test_two_priests_infusing_the_same_player_at_once_is_wasted():
+    data = report()
+    # Healz infuses Pumper at 1:40 into the pull; Tanky lands one on Pumper 5 s later.
+    data["powerInfusion"] = _pi(2, 3, 1_100_000) + _pi(1, 3, 1_105_000) + _pi(2, 6, 1_150_000)
+    night = analyze(data, SETTINGS)
+    [overlap] = night.pi_overlaps
+    assert (overlap.receiver.name, overlap.seconds) == ("Pumper", 10.0)
+    assert [g.name for g in overlap.givers] == ["Healz", "Tanky"]
+    text = all_text(full_text(data))
+    assert "**🪫 Doubled up**\n-# Two priests' Power Infusion on the same player at once\n" in text
+    assert "**Pumper** · once, 10s of Power Infusion wasted" in text
+
+
+def test_one_priest_reinfusing_the_same_player_isnt_an_overlap():
+    data = report()
+    data["powerInfusion"] = _pi(2, 3, 1_100_000) + _pi(2, 3, 1_105_000) + _pi(2, 3, 1_140_000)
+    assert analyze(data, SETTINGS).pi_overlaps == []
+
+
+def test_infusion_windows_need_both_ends():
+    data = report()  # the sample's events have no "came off", so there are no windows to compare
+    night = analyze(data, SETTINGS)
+    assert night.infusions == [] and night.pi_overlaps == []
+    assert sum(night.power_infusion.values()) == 4  # the count still works

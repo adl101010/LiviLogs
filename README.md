@@ -44,7 +44,7 @@ The thread has seven sections, each its own card, posted only if it has somethin
 |---|---|
 | 🗺️ The night | Every boss: kills, pulls, best wipe. A boss-health bar per pull on long progression bosses, time on bosses, 💔 Heartbreaker (closest wipe before a kill), 🧱 Wall of the night, ☠️ Raid's nemesis, 🧨 Wipe starter |
 | 📊 Parses | Everyone's night average by role, in WCL's colours, 👑 on top. On a night with no kills: raw DPS/HPS instead (wipes don't get parses) |
-| 🌟 Highlights | 🩷 Pink parse, 🎵 Metronome, 🦶 Kick captain, 🧼 Dispel machine, 🪄 Necromancer, 💜 Power Infusion (everyone a priest infused, most to least), 🧍 Last one standing |
+| 🌟 Highlights | 🩷 Pink parse, 🎵 Metronome, 🦶 Kick captain, 🧼 Dispel machine, 🪄 Necromancer, 💜 Power Infusion (each priest's targets, most to least), 🪫 Doubled up (two priests' PI on one player at once), 🧍 Last one standing |
 | 🤡 Lowlights | 🚽 Parse of shame, 🎢 Rollercoaster, ⚔️ Battle healer, 🧽 Damage sponge, 🛡️ Outdamaged by a tank, 💤 Idle (DPS and tanks well under the raid's usual active time) |
 | 💀 Deaths | 💀 Floor inspector, 🐤 Canary, 🎁 Couldn't wait for loot, 🎯 Nemesis, 🧲 Brez magnet, 👻 Ghost (most time spent dead, 3 minutes or more), ⏱️ Speedrunner |
 | 🧪 Consumables | 🔮 Tryhards (Void-Touched rune), 🍺 Potion seller, 🫗 Mana chugger, 🍪 Cookie monster, 🧪 Potion hoarders, 🪦 Died with a healthstone in the bag, ⚗️ No flask, 🍗 Forgot to eat, 🛢️ No weapon oil, 📜 No vantus, ⌛ Ran out mid-pull (flask or food expired during a pull; weapon oil that ran out between pulls). Retail only |
@@ -92,6 +92,11 @@ How the numbers work:
   It's compared with the raid rather than a fixed bar because movement-heavy prog wipes pull
   everyone down together. Healers are left out: WCL counts heals over time and shields ticking
   as healing, so every healer reads near 100%.
+- **Power Infusion** is listed per priest, each one's targets most to least; priests infusing
+  themselves don't count (the talent does that for them). The bot reads when each buff landed and
+  when it came off, so it can also tell when two priests had one on the same player at the same
+  time, and how many seconds of the second buff were wasted. It stays quiet unless a priest's top
+  target got at least 3.
 - **Weapon oil** is read from the main hand in each pull's gear snapshot: oils, sharpening stones
   and shaman imbues all count. Missing it on 2+ pulls is called out, like flask and food.
 - **Ran out mid-pull**: WCL logs the moment a flask or food buff comes off, so a buff that expired

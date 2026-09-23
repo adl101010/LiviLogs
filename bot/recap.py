@@ -173,6 +173,8 @@ class Night:
     specs: dict[Char, int] = field(default_factory=dict)  # WoW spec id
     active: dict[Char, float] = field(default_factory=dict)  # share of time alive in pulls spent acting
     ran_out: list["RanOut"] = field(default_factory=list)  # flask/food buffs that expired mid-pull
+    infusions: list["Infusion"] = field(default_factory=list)  # every Power Infusion, with its window
+    pi_overlaps: list["Overlap"] = field(default_factory=list)  # two priests' PI on one target at once
 
     @property
     def has_parses(self) -> bool:
@@ -622,14 +624,62 @@ def _time_dead(report: dict, players: dict[int, Char], pulls: list[Pull],
     return dead
 
 
-def _power_infusion(report: dict, players: dict[int, Char], pull_ids: set[int]) -> Counter:
+@dataclass(frozen=True)
+class Infusion:
+    """One Power Infusion, from when it landed to when it fell off."""
+    giver: Char
+    receiver: Char
+    pull: int
+    start: int
+    end: int
+
+
+@dataclass(frozen=True)
+class Overlap:
+    """Two priests' Power Infusion on the same target at the same time: the second one is wasted."""
+    receiver: Char
+    givers: tuple[Char, Char]
+    pull: int
+    seconds: float
+
+
+def _power_infusion(report: dict, players: dict[int, Char],
+                    pull_ids: set[int]) -> tuple[Counter, list[Infusion]]:
+    """Who infused whom, and each buff's window. Priests infusing themselves don't count: the talent
+    gives them one automatically. A buff with no "came off" event (an old report, or a log that
+    stopped mid-pull) still counts, it just has no window."""
     given: Counter = Counter()
+    infusions: list[Infusion] = []
+    started: dict[tuple[int, int], int] = {}
     events = report.get("powerInfusion")
-    for e in events if isinstance(events, list) else []:
+    for e in sorted(events if isinstance(events, list) else [], key=lambda e: e.get("timestamp") or 0):
         giver, receiver = players.get(e.get("sourceID")), players.get(e.get("targetID"))
-        if giver and receiver and giver != receiver and e.get("fight") in pull_ids:
-            given[(giver, receiver)] += 1
-    return given
+        if not giver or not receiver or giver == receiver or e.get("fight") not in pull_ids:
+            continue
+        key = (e.get("sourceID"), e.get("targetID"))
+        if e.get("type") == "removebuff":
+            start = started.pop(key, None)
+            if start is not None:
+                infusions.append(Infusion(giver, receiver, e["fight"], start, e.get("timestamp") or start))
+            continue
+        given[(giver, receiver)] += 1
+        started[key] = e.get("timestamp") or 0
+    return given, infusions
+
+
+def _overlaps(infusions: list[Infusion]) -> list[Overlap]:
+    """Power Infusions from different priests running at the same time on one player."""
+    by_receiver: dict[Char, list[Infusion]] = defaultdict(list)
+    for pi in infusions:
+        by_receiver[pi.receiver].append(pi)
+    out = []
+    for receiver, theirs in by_receiver.items():
+        theirs.sort(key=lambda pi: pi.start)
+        for first, second in zip(theirs, theirs[1:]):
+            if second.start < first.end and first.giver != second.giver:
+                overlap = (min(first.end, second.end) - second.start) / 1000
+                out.append(Overlap(receiver, (first.giver, second.giver), second.pull, overlap))
+    return sorted(out, key=lambda o: (-o.seconds, o.receiver.name.casefold()))
 
 
 def _resurrects(report: dict, players: dict[int, Char], pull_ids: set[int]) -> tuple[Counter, Counter]:
@@ -676,6 +726,7 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
     health, mana = _consumable_casts(report, players, settings.extra_health_items)
     mana_by_pull = _mana_potions(report, players, pull_ids)
     gear_at_pull, specs = _gear_at_pull(report, players, pull_ids)
+    power_infusion, infusions = _power_infusion(report, players, pull_ids)
     dead_seconds = _time_dead(report, players, pulls, deaths)
     if mana_by_pull is not None:  # the per-pull casts are the same count, limited to boss pulls
         mana = Counter({c: sum(n.values()) for c, n in mana_by_pull.items()})
@@ -719,7 +770,9 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
         health_items=health,
         mana_potions=mana,
         dead_seconds=dead_seconds,
-        power_infusion=_power_infusion(report, players, pull_ids),
+        power_infusion=power_infusion,
+        infusions=infusions,
+        pi_overlaps=_overlaps(infusions),
         potions_by_pull=potions_by_pull,
         mana_by_pull=mana_by_pull or {},
         gear_at_pull=gear_at_pull,

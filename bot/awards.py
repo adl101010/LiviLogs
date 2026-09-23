@@ -411,32 +411,46 @@ class Builder:
         self.add(section, [*joined(chars), tail], key, chars, title=title)
 
     def power_infusion(self) -> None:
-        """Everyone a priest gave Power Infusion to, most to least (priests on themselves don't
-        count). With one priest giving them all, the note says so instead of repeating the name."""
+        """One line per priest: who they infused, most to least. Priests infusing themselves don't
+        count. Two priests landing it on the same person at once is called out as wasted."""
         night = self.night
-        received: Counter = Counter()
-        for (_, receiver), given in night.power_infusion.items():
-            received[receiver] += given
-        if not received or max(received.values()) < PI_MIN:
+        self.pi_overlaps()
+        if not night.power_infusion or max(night.power_infusion.values()) < PI_MIN:
             return
-        givers = {g for g, _ in night.power_infusion}
-        ordered = sorted(received.items(), key=lambda rn: (-rn[1], rn[0].name.casefold()))
-        shown, rest = ordered[:PI_MAX_NAMES], ordered[PI_MAX_NAMES:]
+        by_giver: dict[Char, Counter] = {}
+        for (giver, receiver), given in night.power_infusion.items():
+            by_giver.setdefault(giver, Counter())[receiver] += given
         parts: list[Part] = []
-        for i, (receiver, given) in enumerate(shown):
+        winners: list[Char] = []
+        for i, (giver, targets) in enumerate(sorted(by_giver.items(),
+                                                    key=lambda gt: (-sum(gt[1].values()), gt[0].name.casefold()))):
             if i:
-                parts.append(" · ")
-            parts += [receiver, f" {int(given)}"]
-            if len(givers) > 1:  # several priests: say whose it mostly was
-                from_them = Counter({g: t for (g, r), t in night.power_infusion.items() if r == receiver})
-                parts += [" (from ", from_them.most_common(1)[0][0], ")"]
-        if rest:
-            parts.append(f" · +{len(rest)} more")
-        note = "Who got it, most to least"
-        if len(givers) == 1:
-            note += f", all from {next(iter(givers)).name}"
-        self.add(HIGHLIGHTS, parts, "pi", [r for r, _ in ordered], title="💜 Power Infusion", note=note,
-                 stacked=True)
+                parts.append("\n")
+            ordered = sorted(targets.items(), key=lambda rn: (-rn[1], rn[0].name.casefold()))
+            shown, rest = ordered[:PI_MAX_NAMES], ordered[PI_MAX_NAMES:]
+            parts += [giver, " · "] if len(by_giver) > 1 else []
+            for j, (receiver, given) in enumerate(shown):
+                parts += [" · "] if j else []
+                parts += [receiver, f" {int(given)}"]
+                winners.append(receiver)
+            if rest:
+                parts.append(f" · +{len(rest)} more")
+        note = "Who each priest infused, most to least" if len(by_giver) > 1 else \
+            f"Who got it, most to least, all from {next(iter(by_giver)).name}"
+        self.add(HIGHLIGHTS, parts, "pi", list(dict.fromkeys(winners)), title="💜 Power Infusion",
+                 note=note, stacked=True, cluster="pi")
+
+    def pi_overlaps(self) -> None:
+        """Two priests landing Power Infusion on one player at once: the second buff does nothing."""
+        overlaps = self.night.pi_overlaps
+        if not overlaps:
+            return
+        wasted = sum(o.seconds for o in overlaps)
+        people = list(dict.fromkeys(o.receiver for o in overlaps))
+        self.add(HIGHLIGHTS, [*joined(people[:3]), f" · {times(len(overlaps))}",
+                              f", {wasted:.0f}s of Power Infusion wasted"],
+                 "pi_overlap", people, title="🪫 Doubled up",
+                 note="Two priests' Power Infusion on the same player at once", cluster="pi")
 
     # --- lowlights -----------------------------------------------------------------------------
 

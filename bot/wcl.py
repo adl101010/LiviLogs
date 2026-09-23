@@ -102,8 +102,7 @@ query Recap($code: String!, $deathsKillType: KillType) {
         data nextPageTimestamp
       }
       casts: table(dataType: Casts, viewBy: Ability, %(night)s)
-      powerInfusion: events(filterExpression: "type = 'applybuff' and ability.name = 'Power Infusion'", %(night)s,
-                            limit: 10000) {
+      powerInfusion: events(filterExpression: "%(pi_filter)s", %(night)s, limit: 10000) {
         data nextPageTimestamp
       }
     }
@@ -121,6 +120,9 @@ query MoreEvents(%(params)s) {
   }
 }
 """
+# Both ends of the buff, so the report knows when each Power Infusion started and finished.
+PI_FILTER = "type in ('applybuff', 'removebuff') and ability.name = 'Power Infusion'"
+
 _EVENT_PAGES = {
     "deathEvents": {
         "params": "$code: String!, $start: Float!, $deathsKillType: KillType",
@@ -136,7 +138,7 @@ _EVENT_PAGES = {
     },
     "powerInfusion": {
         "params": "$code: String!, $start: Float!",
-        "filter": "filterExpression: \"type = 'applybuff' and ability.name = 'Power Infusion'\", killType: Encounters",
+        "filter": "filterExpression: \"%(pi_filter)s\", killType: Encounters",
     },
     "potionEvents": {
         "params": "$code: String!, $start: Float!",
@@ -276,10 +278,11 @@ class WCLClient:
     async def report_full(self, ref: ReportRef, settings: RecapSettings) -> dict:
         potion_filter = _potion_filter(settings)
         query = _FULL_QUERY % {"rankings_args": _rankings_args(settings), "end": _END, "night": _WHOLE_NIGHT,
-                               "potion_filter": potion_filter}
+                               "potion_filter": potion_filter, "pi_filter": PI_FILTER}
         variables = {"code": ref.code, "deathsKillType": "All" if settings.deaths_include_trash else "Encounters"}
         report = await self.query(ref.host, query, variables)
-        filters = {"potion_filter": potion_filter, "mana_filter": _mana_potion_filter(report)}
+        filters = {"potion_filter": potion_filter, "mana_filter": _mana_potion_filter(report),
+                   "pi_filter": PI_FILTER}
         for field, key in (("deathEvents", "deaths"), ("resurrectEvents", "resurrects"),
                            ("combatantInfo", "combatantInfo"), ("potionEvents", "potions"),
                            ("powerInfusion", "powerInfusion")):

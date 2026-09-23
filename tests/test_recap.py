@@ -412,27 +412,38 @@ def _pi(source, target, start, end=None, fight=6):
                   "timestamp": end or start + 15_000}]
 
 
-def test_two_priests_infusing_the_same_player_at_once_is_wasted():
+def test_a_priest_overwriting_another_priests_infusion():
     data = report()
-    # Healz infuses Pumper at 1:40 into the pull; Tanky lands one on Pumper 5 s later.
-    data["powerInfusion"] = _pi(2, 3, 1_100_000) + _pi(1, 3, 1_105_000) + _pi(2, 6, 1_150_000)
+    # Healz infuses Pumper; 2 s later Tanky lands one on Pumper, which ends Healz's early.
+    # Power Infusion doesn't stack, so the log shows the first buff off as the second goes on.
+    data["powerInfusion"] = (_pi(2, 3, 1_100_000, end=1_102_000) + _pi(1, 3, 1_102_000)
+                             + _pi(2, 6, 1_150_000))
     night = analyze(data, SETTINGS)
-    [overlap] = night.pi_overlaps
-    assert (overlap.receiver.name, overlap.seconds) == ("Pumper", 10.0)
-    assert [g.name for g in overlap.givers] == ["Healz", "Tanky"]
+    [gone] = night.pi_overwritten
+    assert (gone.receiver.name, gone.cut.name, gone.by.name) == ("Pumper", "Healz", "Tanky")
+    assert (gone.ran, gone.lost) == (2.0, 13.0)  # 15 s is the full length elsewhere in this log
     text = all_text(full_text(data))
-    assert "**🪫 Doubled up**\n-# Two priests' Power Infusion on the same player at once\n" in text
-    assert "**Pumper** · once, 10s of Power Infusion wasted" in text
+    assert "**🪫 Overwritten · 13s of Power Infusion wasted**\n" in text
+    assert "-# One priest's Power Infusion replaced by another's on the same player\n" in text
+    assert "**Pumper** · **Healz** → **Tanky** after 2s · 13s lost" in text
 
 
-def test_one_priest_reinfusing_the_same_player_isnt_an_overlap():
+def test_losing_a_second_or_two_isnt_worth_saying():
     data = report()
-    data["powerInfusion"] = _pi(2, 3, 1_100_000) + _pi(2, 3, 1_105_000) + _pi(2, 3, 1_140_000)
-    assert analyze(data, SETTINGS).pi_overlaps == []
+    data["powerInfusion"] = (_pi(2, 3, 1_100_000, end=1_113_000) + _pi(1, 3, 1_113_000)
+                             + _pi(2, 6, 1_150_000))
+    assert analyze(data, SETTINGS).pi_overwritten == []  # 2 s lost
+
+
+def test_one_priest_reinfusing_the_same_player_isnt_overwriting():
+    data = report()
+    data["powerInfusion"] = (_pi(2, 3, 1_100_000, end=1_102_000) + _pi(2, 3, 1_102_000)
+                             + _pi(2, 6, 1_150_000))
+    assert analyze(data, SETTINGS).pi_overwritten == []
 
 
 def test_infusion_windows_need_both_ends():
     data = report()  # the sample's events have no "came off", so there are no windows to compare
     night = analyze(data, SETTINGS)
-    assert night.infusions == [] and night.pi_overlaps == []
+    assert night.infusions == [] and night.pi_overwritten == []
     assert sum(night.power_infusion.values()) == 4  # the count still works

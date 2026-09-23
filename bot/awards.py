@@ -387,8 +387,8 @@ class Builder:
         """One line per priest: who they infused, most to least. Priests infusing themselves don't
         count. Two priests landing it on the same person at once is called out as wasted."""
         night = self.night
-        self.pi_overlaps()
         if not night.power_infusion or max(night.power_infusion.values()) < PI_MIN:
+            self.pi_overwritten()  # worth saying even when nobody was infused much
             return
         by_giver: dict[Char, Counter] = {}
         for (giver, receiver), given in night.power_infusion.items():
@@ -412,18 +412,24 @@ class Builder:
             f"Who got it, most to least, all from {next(iter(by_giver)).name}"
         self.add(HIGHLIGHTS, parts, "pi", list(dict.fromkeys(winners)), title="💜 Power Infusion",
                  note=note, stacked=True, cluster="pi")
+        self.pi_overwritten()
 
-    def pi_overlaps(self) -> None:
-        """Two priests landing Power Infusion on one player at once: the second buff does nothing."""
-        overlaps = self.night.pi_overlaps
-        if not overlaps:
+    def pi_overwritten(self) -> None:
+        """Power Infusions replaced by another priest's. The buff doesn't stack, so the first one
+        ends as the second lands and the rest of it is wasted."""
+        gone = self.night.pi_overwritten
+        if not gone:
             return
-        wasted = sum(o.seconds for o in overlaps)
-        people = list(dict.fromkeys(o.receiver for o in overlaps))
-        self.add(HIGHLIGHTS, [*joined(people[:3]), f" · {times(len(overlaps))}",
-                              f", {wasted:.0f}s of Power Infusion wasted"],
-                 "pi_overlap", people, title="🪫 Doubled up",
-                 note="Two priests' Power Infusion on the same player at once", cluster="pi")
+        parts: list[Part] = []
+        for i, o in enumerate(gone):
+            if i:
+                parts.append("\n")
+            parts += [o.receiver, " · ", o.cut, " → ", o.by, f" after {o.ran:.0f}s · {o.lost:.0f}s lost"]
+        wasted = sum(o.lost for o in gone)
+        self.add(HIGHLIGHTS, parts, "pi_overwritten", [o.receiver for o in gone],
+                 title=f"🪫 Overwritten · {wasted:.0f}s of Power Infusion wasted",
+                 note="One priest's Power Infusion replaced by another's on the same player",
+                 cluster="pi", stacked=True)
 
     # --- lowlights -----------------------------------------------------------------------------
 

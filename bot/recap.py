@@ -174,7 +174,7 @@ class Night:
     active: dict[Char, float] = field(default_factory=dict)  # share of time alive in pulls spent acting
     ran_out: list["RanOut"] = field(default_factory=list)  # flask/food buffs that expired mid-pull
     infusions: list["Infusion"] = field(default_factory=list)  # every Power Infusion, with its window
-    pi_overlaps: list["Overlap"] = field(default_factory=list)  # two priests' PI on one target at once
+    pi_overwritten: list["Overwritten"] = field(default_factory=list)  # PI replaced by another priest's
 
     @property
     def has_parses(self) -> bool:
@@ -635,12 +635,15 @@ class Infusion:
 
 
 @dataclass(frozen=True)
-class Overlap:
-    """Two priests' Power Infusion on the same target at the same time: the second one is wasted."""
+class Overwritten:
+    """A Power Infusion cut short because another priest landed one on the same player. The buff
+    doesn't stack, so the first one ends the moment the second lands."""
     receiver: Char
-    givers: tuple[Char, Char]
+    cut: Char  # the priest whose buff was replaced
+    by: Char  # the priest who replaced it
     pull: int
-    seconds: float
+    ran: float  # seconds the replaced buff actually lasted
+    lost: float  # seconds of it that went to waste
 
 
 def _power_infusion(report: dict, players: dict[int, Char],
@@ -667,8 +670,17 @@ def _power_infusion(report: dict, players: dict[int, Char],
     return given, infusions
 
 
-def _overlaps(infusions: list[Infusion]) -> list[Overlap]:
-    """Power Infusions from different priests running at the same time on one player."""
+CLIP_GRACE_MS = 1000  # the first buff ends as the second lands, give or take a moment
+MIN_LOST_SECONDS = 3  # two priests pressing within a global cooldown isn't worth a callout
+
+
+def _overwritten(infusions: list[Infusion]) -> list[Overwritten]:
+    """Power Infusions replaced by another priest's on the same player. Power Infusion doesn't
+    stack, so the first buff ends as the second lands rather than running alongside it. Full length
+    is taken from the log itself (the longest one seen), so talents or a patch can't throw it off."""
+    if not infusions:
+        return []
+    full = max(pi.end - pi.start for pi in infusions)
     by_receiver: dict[Char, list[Infusion]] = defaultdict(list)
     for pi in infusions:
         by_receiver[pi.receiver].append(pi)
@@ -676,10 +688,12 @@ def _overlaps(infusions: list[Infusion]) -> list[Overlap]:
     for receiver, theirs in by_receiver.items():
         theirs.sort(key=lambda pi: pi.start)
         for first, second in zip(theirs, theirs[1:]):
-            if second.start < first.end and first.giver != second.giver:
-                overlap = (min(first.end, second.end) - second.start) / 1000
-                out.append(Overlap(receiver, (first.giver, second.giver), second.pull, overlap))
-    return sorted(out, key=lambda o: (-o.seconds, o.receiver.name.casefold()))
+            lost = full - (first.end - first.start)
+            if (first.giver != second.giver and second.start - first.end <= CLIP_GRACE_MS
+                    and lost >= MIN_LOST_SECONDS * 1000):
+                out.append(Overwritten(receiver, first.giver, second.giver, second.pull,
+                                       (first.end - first.start) / 1000, lost / 1000))
+    return sorted(out, key=lambda o: (-o.lost, o.receiver.name.casefold()))
 
 
 def _resurrects(report: dict, players: dict[int, Char], pull_ids: set[int]) -> tuple[Counter, Counter]:
@@ -772,7 +786,7 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
         dead_seconds=dead_seconds,
         power_infusion=power_infusion,
         infusions=infusions,
-        pi_overlaps=_overlaps(infusions),
+        pi_overwritten=_overwritten(infusions),
         potions_by_pull=potions_by_pull,
         mana_by_pull=mana_by_pull or {},
         gear_at_pull=gear_at_pull,

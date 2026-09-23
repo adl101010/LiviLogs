@@ -104,7 +104,8 @@ How the numbers work:
   (Hearty food doesn't), so a buff lost within 3 seconds of its owner's death isn't counted. When 5
   or more raiders' food runs out on the same pull, it's one "raid food ran out" line: one feast
   wearing off. Weapon oil isn't in the combat log, only in each pull's gear snapshot, so for oil it
-  says which pull it was gone from (for anyone the No weapon oil rule flags). One extra small WCL
+  says which pull it was gone from onwards (for anyone the No weapon oil rule flags). The block
+  ends with a one-line tally, so a short list plainly finishes rather than looking cut off. One extra small WCL
   query per report, for just this log's flask and food buffs.
 - **Deaths** count every boss pull, kills and wipes, but only the first 5 deaths of each pull: people
   who die after the wipe is called don't get blamed. Ties are included unless it's a pile-up.

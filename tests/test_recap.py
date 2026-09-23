@@ -244,7 +244,8 @@ def test_consumables_card():
         # one feast wearing off.
         "**⌛ Ran out mid-pull**\n-# Flask or food that expired during a boss pull\n"
         "**Pumper** flask · Boss C pull 2, 1m 40s in\n"
-        "Raid food ran out for 5 raiders · Boss C pull 2, about 2m 30s in",
+        "Raid food ran out for 5 raiders · Boss C pull 2, about 2m 30s in\n"
+        "-# That's everyone: 1 flask expired mid-pull · 5 raiders lost their food",
     ]
 
 

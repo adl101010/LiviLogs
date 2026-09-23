@@ -607,7 +607,9 @@ class Builder:
                      key=lambda r: r.char.name.casefold())
         for r in oil:
             gone = pull_label(night, r.oil_gone_pull)
-            entries.append((r.oil_gone_pull, -1, [r.char, f" weapon oil · gone from {gone} on"]))
+            without = plural(r.oil_pulls - r.oil, "pull")
+            entries.append((r.oil_gone_pull, -1,
+                            [r.char, f" weapon oil · none from {gone} onwards ({without})"]))
             winners.append(r.char)
         if not entries:
             return
@@ -617,6 +619,17 @@ class Builder:
             if i:
                 parts.append("\n")
             parts += text
+        # A short tally, so a two-line list plainly ends rather than looking cut off.
+        tally = []
+        flasks = sum(1 for r in night.ran_out if r.kind == "flask")
+        meals = sum(1 for r in night.ran_out if r.kind == "food")
+        if flasks:
+            tally.append(f"{plural(flasks, 'flask')} expired mid-pull")
+        if meals:
+            tally.append(f"{plural(meals, 'raider')} lost their food")
+        if oil:
+            tally.append(f"{plural(len(oil), 'raider')} lost their weapon oil")
+        parts.append("\n-# That's everyone: " + " · ".join(tally))
         self.add(CONSUMABLES, parts, "ran_out", list(dict.fromkeys(winners)), title="⌛ Ran out mid-pull",
                  note="Flask or food that expired during a boss pull"
                       + (", and weapon oil between pulls" if oil else ""),

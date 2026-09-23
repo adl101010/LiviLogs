@@ -46,7 +46,9 @@ def test_real_night():
     night = analyze(json.loads((FIXTURES / "gear_night.json").read_text(encoding="utf-8")), SETTINGS)
     text = consumables_text(night)
     assert "**⌛ Ran out mid-pull**\n-# Flask or food that expired during a boss pull, and weapon oil between pulls\n" in text
-    assert " weapon oil · gone from Ula'tek pull 4 on\n" in text
+    assert " weapon oil · none from Ula'tek pull 4 onwards (5 pulls)\n" in text
+    assert "-# That's everyone: 1 flask expired mid-pull · 14 raiders lost their food · " \
+           "1 raider lost their weapon oil" in text
     assert " flask · Ula'tek pull 4, 2m 01s in\n" in text
     # Hearty food from one feast ran out on most of the raid 3 minutes into the same pull. The
     # regular food lost when people died on the last wipe isn't counted.

@@ -49,7 +49,7 @@ def test_guild_kill_night():
     assert "**🎁 Couldn't wait for loot**" in text and "3 deaths each on kills" in text
     assert "Nemesis" not in text  # a three-way tie at 3: nobody stands out
     assert "**👻 Ghost** - " in text and " · spent 8m 47s dead" in text
-    assert "PI's favorite" not in text  # no Power Infusion given to anyone else that night
+    assert "Power Infusion" not in text  # none given to anyone else that night
 
     consumables = card_text(next(c for c in r.thread if c.title.startswith("🧪")))
     assert "every pull · " in consumables and " 13 of 18 · " in consumables and " 11 of 18" in consumables
@@ -78,7 +78,8 @@ def test_guild_prog_night():
     assert "9 battle rezzes" in text
     assert "died to Necrotic Vapors 6 times" in text
     assert " · spent 12m 22s dead" in text  # ghost
-    assert " · got Power Infusion from " in text and " 30 times" in text  # PI's favorite
+    # One priest, two targets: listed most to least, with the priest named once in the note.
+    assert "-# Who got it, most to least, all from P-f7d636" in text and "** 30 · **" in text
 
     consumables = card_text(next(c for c in r.thread if c.title.startswith("🧪")))
     assert "28 combat potions in 18 pulls" in consumables

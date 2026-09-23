@@ -215,7 +215,7 @@ def test_awards():
     assert "**🎯 Nemesis** - **Dyer** died to Fire 3 times" in text
     assert "**🧲 Brez magnet** - **Dyer** · rezzed 3 times" in text
     assert "**👻 Ghost** - **Greyson** · spent 4m 19s dead" in text
-    assert "**💜 PI's favorite** - **Pumper** · got Power Infusion from **Healz** 4 times" in text
+    assert "**💜 Power Infusion**\n-# Who got it, most to least, all from Healz\n**Pumper** 4" in text
     assert "**💀 Floor inspector**\n-# Deaths before the wipe was called\n**Dyer** 3 · **Greyson** 2" in text
     # Nothing worth saying tonight: these stay silent rather than print a weak line.
     for quiet in ("Metronome", "Rollercoaster", "Battle healer", "Canary", "Couldn't wait for loot",
@@ -392,3 +392,19 @@ def test_time_dead_has_seconds():
     from bot.awards import fmt_seconds
 
     assert [fmt_seconds(s) for s in (45, 60, 526.98, 3735)] == ["45s", "1m 00s", "8m 47s", "1h 02m 15s"]
+
+
+def test_power_infusion_lists_everyone_most_to_least():
+    data = report()
+    # Healz already infused Pumper 4 times; add two more targets, one of them from a second priest.
+    data["powerInfusion"] += [{"type": "applybuff", "sourceID": 2, "targetID": 6, "fight": f} for f in (1, 2, 3, 5, 6, 6)]
+    data["powerInfusion"] += [{"type": "applybuff", "sourceID": 1, "targetID": 5, "fight": f} for f in (1, 2)]
+    text = all_text(full_text(data))
+    assert "**💜 Power Infusion**\n-# Who got it, most to least\n" in text
+    assert "**Middling** 6 (from **Healz**) · **Pumper** 4 (from **Healz**) · **Dyer** 2 (from **Tanky**)" in text
+
+
+def test_a_priest_topping_up_one_person_isnt_listed():
+    data = report()
+    data["powerInfusion"] = data["powerInfusion"][:2]  # twice, on one target: not a pattern
+    assert "Power Infusion" not in all_text(full_text(data))

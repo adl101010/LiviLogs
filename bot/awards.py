@@ -160,6 +160,8 @@ def parse_colour(pct: float) -> str:
 
 ROLE_EMOJI = {DPS: "⚔️", HEALER: "💚", TANK: "🛡️"}
 ROLE_NAMES = {DPS: "Damage", HEALER: "Healing", TANK: "Tanks"}
+PI_MIN = 3  # fewer than this to the top target isn't a pattern worth listing
+PI_MAX_NAMES = 8
 RAID_FOOD_MIN = 5  # this many raiders' food running out on one pull is one feast wearing off
 IDLE_GAP = 0.10  # 10 points under the raid's usual active time
 IDLE_MIN_RAIDERS = 5  # too few DPS and tanks to say what's usual
@@ -387,17 +389,7 @@ class Builder:
             if not pull.kill and deaths:
                 wipes_with_deaths += 1
                 last[deaths[-1].char] += 1
-        # PI's favourite: whoever a priest kept giving Power Infusion to (priests on themselves don't count).
-        received = Counter()
-        for (giver, receiver), times_given in night.power_infusion.items():
-            received[receiver] += times_given
-        chars, n = leaders(received, 3, max_names=1)
-        if chars:
-            givers = Counter({g: t for (g, r), t in night.power_infusion.items() if r == chars[0]})
-            giver, from_them = givers.most_common(1)[0]
-            source: list[Part] = [" from ", giver] if from_them == n else [" from ", giver, " and others"]
-            self.add(HIGHLIGHTS, [chars[0], " · got Power Infusion", *source, f" {times(int(n))}"], "pi", chars,
-                     title="💜 PI's favorite")
+        self.power_infusion()
 
         chars, n = leaders(last, 3, max_names=1)
         if chars and wipes_with_deaths >= 3:
@@ -417,6 +409,34 @@ class Builder:
             if rest:
                 tail += f" (next best: {int(rest[0])})"
         self.add(section, [*joined(chars), tail], key, chars, title=title)
+
+    def power_infusion(self) -> None:
+        """Everyone a priest gave Power Infusion to, most to least (priests on themselves don't
+        count). With one priest giving them all, the note says so instead of repeating the name."""
+        night = self.night
+        received: Counter = Counter()
+        for (_, receiver), given in night.power_infusion.items():
+            received[receiver] += given
+        if not received or max(received.values()) < PI_MIN:
+            return
+        givers = {g for g, _ in night.power_infusion}
+        ordered = sorted(received.items(), key=lambda rn: (-rn[1], rn[0].name.casefold()))
+        shown, rest = ordered[:PI_MAX_NAMES], ordered[PI_MAX_NAMES:]
+        parts: list[Part] = []
+        for i, (receiver, given) in enumerate(shown):
+            if i:
+                parts.append(" · ")
+            parts += [receiver, f" {int(given)}"]
+            if len(givers) > 1:  # several priests: say whose it mostly was
+                from_them = Counter({g: t for (g, r), t in night.power_infusion.items() if r == receiver})
+                parts += [" (from ", from_them.most_common(1)[0][0], ")"]
+        if rest:
+            parts.append(f" · +{len(rest)} more")
+        note = "Who got it, most to least"
+        if len(givers) == 1:
+            note += f", all from {next(iter(givers)).name}"
+        self.add(HIGHLIGHTS, parts, "pi", [r for r, _ in ordered], title="💜 Power Infusion", note=note,
+                 stacked=True)
 
     # --- lowlights -----------------------------------------------------------------------------
 

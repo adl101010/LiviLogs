@@ -14,7 +14,8 @@ from dataclasses import dataclass, field
 from .config import RecapSettings
 from .gear import describe, gear_rows
 from .recap import (
-    DPS, FLASK_PREFIXES, FOOD_PATTERN, HEALER, TANK, VANTUS_PREFIX, Boss, Char, Night, ParseLine,
+    DIFFICULTY_NAMES, DPS, FLASK_PREFIXES, FOOD_PATTERN, HEALER, TANK, VANTUS_PREFIX, Boss, Char, Night,
+    ParseLine,
 )
 
 HEADLINE = "headline"
@@ -151,11 +152,20 @@ IDLE_MIN_RAIDERS = 5  # too few DPS and tanks to say what's usual
 PHASE_BARS = "▁▂▃▄▅▆▇█"
 
 
+def difficulty_name(difficulty: int | None) -> str:
+    return DIFFICULTY_NAMES.get(difficulty or 0, "")
+
+
 class Builder:
     def __init__(self, night: Night, settings: RecapSettings):
         self.night = night
         self.settings = settings
         self.lines: list[Line] = []
+
+    def tag(self, difficulty: int | None) -> str:
+        """" (Mythic)" on a night that raided more than one difficulty, nothing on a normal night."""
+        name = difficulty_name(difficulty)
+        return f" ({name})" if name and len(self.night.difficulties) > 1 else ""
 
     def add(self, section: str, parts: list[Part], key: str | None = None,
             winners: list[Char] | None = None, *, title: str | None = None, note: str | None = None,
@@ -178,8 +188,9 @@ class Builder:
                 lines = [p for p in night.parses if p.role == role]
                 if lines:
                     best = max(p.average for p in lines)
-                    top = [p.char for p in lines if p.average == best]
-                    self.top_line(title, key, top, f"{best:.1f}")
+                    winners = [p for p in lines if p.average == best]
+                    self.top_line(title, key, [p.char for p in winners],
+                                  f"{best:.1f}{self.tag(winners[0].difficulty)}")
         else:
             for role, title, key, unit in ((DPS, "🏆 Top DPS", "top_dps", ""),
                                            (HEALER, "💚 Top healer", "top_healer", " HPS")):
@@ -224,7 +235,7 @@ class Builder:
             if i:
                 parts.append(" · ")
             kind = "healing" if p.role == HEALER else "damage"
-            parts += [p.char, f" {kind} {p.average:.1f}"]
+            parts += [p.char, f" {kind} {p.average:.1f}{self.tag(p.difficulty)}"]
         return parts
 
     # --- the night -----------------------------------------------------------------------------
@@ -232,17 +243,26 @@ class Builder:
     def the_night(self) -> None:
         night = self.night
         if night.bosses:
-            entries = []
-            for boss in night.bosses:
+            def entry(boss: Boss) -> str:
                 if boss.killed:
                     count = "" if len(boss.pulls) == 1 else f" ({len(boss.pulls)} pulls)"
-                    entries.append(f"✅ {boss.name}{count}")
-                else:
-                    entries.append(f"❌ {boss.name} ({plural(len(boss.wipes), 'wipe')})")
+                    return f"✅ {boss.name}{count}"
+                return f"❌ {boss.name} ({plural(len(boss.wipes), 'wipe')})"
+
+            # A night on two difficulties killed some bosses twice, so each gets its own line.
+            if len(night.difficulties) > 1:
+                lines = []
+                for difficulty in night.difficulties:
+                    bosses = [b for b in night.bosses if b.difficulty == difficulty]
+                    if bosses:
+                        lines.append(f"**{difficulty_name(difficulty)}** · " + " · ".join(entry(b) for b in bosses))
+                entries = ["\n".join(lines)]
+            else:
+                entries = [" · ".join(entry(b) for b in night.bosses)]
             time = f"{fmt_duration(night.boss_seconds)} on bosses across a {fmt_duration(night.span_seconds)} night"
             first_pull = "Bosses without a count died on the first pull · " if any(
                 b.killed and len(b.pulls) == 1 for b in night.bosses) else ""
-            self.add(NIGHT, [" · ".join(entries)], cluster="bosses")
+            self.add(NIGHT, entries, cluster="bosses")
             self.add(NIGHT, [f"-# {first_pull}{time}"], cluster="bosses")
 
         for index, boss in enumerate(night.bosses):
@@ -294,11 +314,19 @@ class Builder:
     def board(self) -> None:
         night = self.night
         total_pulls = len(night.pulls)
+        difficulties = night.difficulties if night.has_parses and len(night.difficulties) > 1 else [None]
+        for difficulty in difficulties:
+            self.board_rows(difficulty, total_pulls)
+
+    def board_rows(self, difficulty: int | None, total_pulls: int) -> None:
+        night = self.night
         for role in (DPS, HEALER, TANK):
             parts: list[Part] = []
             if night.has_parses:
                 # The top parse on its own line, then one line per WCL colour band.
-                entries = sorted((p for p in night.parses if p.role == role), key=lambda p: -p.average)
+                entries = sorted((p for p in night.parses
+                                  if p.role == role and (difficulty is None or p.difficulty == difficulty)),
+                                 key=lambda p: -p.average)
                 colour = None
                 for i, p in enumerate(entries):
                     now = parse_colour(p.average)
@@ -318,8 +346,11 @@ class Builder:
                     else:
                         parts += ["\n" if i == 1 else " · ", r.char, f" {fmt_rate(r.per_second)}{missed}"]
             if entries:
-                self.add(BOARD, parts, title=f"{ROLE_EMOJI[role]} {ROLE_NAMES[role]}", cluster=role, stacked=True,
-                         chart="parses" if night.has_parses else None)
+                name = difficulty_name(difficulty) if difficulty is not None else ""
+                title = f"{ROLE_EMOJI[role]} {ROLE_NAMES[role]}" + (f" · {name}" if name else "")
+                chart = f"parses:{difficulty}" if difficulty is not None else "parses"
+                self.add(BOARD, parts, title=title, cluster=f"{role}{difficulty or ''}", stacked=True,
+                         chart=chart if night.has_parses else None)
 
     # --- highlights ----------------------------------------------------------------------------
 

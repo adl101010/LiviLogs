@@ -26,7 +26,8 @@ button:
 ```
 
 **👤 My night** (off by default; set `MY_NIGHT=true` to turn it on) adds a button to the headline.
-It shows whoever presses it a card only they can see: their parse on every boss, their
+It shows whoever presses it a card only they can see: their parse on every boss (a block per role
+and difficulty if they swapped or raided both), their
 deaths and what killed them, their consumables (with ⚠️ on anything the report called out, and a
 dot per pull for potions: 🟢 one, 🟣 two or more, ⚫ none), their
 interrupts, dispels and damage, and which callouts they got. It uses the characters an admin has
@@ -42,8 +43,8 @@ The thread has seven sections, each its own card, posted only if it has somethin
 
 | Section | What's in it |
 |---|---|
-| 🗺️ The night | Every boss: kills, pulls, best wipe. A boss-health bar per pull on long progression bosses, time on bosses, 💔 Heartbreaker (closest wipe before a kill), 🧱 Wall of the night, ☠️ Raid's nemesis, 🧨 Wipe starter |
-| 📊 Parses | Everyone's night average by role, in WCL's colours, 👑 on top. On a night with no kills: raw DPS/HPS instead (wipes don't get parses) |
+| 🗺️ The night | Every boss: kills, pulls, best wipe, grouped under **Mythic** / **Heroic** when the night crossed both, so a boss killed twice reads as two kills. A boss-health bar per pull on long progression bosses, time on bosses, 💔 Heartbreaker (closest wipe before a kill), 🧱 Wall of the night, ☠️ Raid's nemesis, 🧨 Wipe starter |
+| 📊 Parses | Everyone's night average by role, in WCL's colours, 👑 on top, one grid per difficulty on a night that raided two. On a night with no kills: raw DPS/HPS instead (wipes don't get parses) |
 | 🌟 Highlights | 🩷 Pink parse, 🎵 Metronome, 🦶 Kick captain, 🧼 Dispel machine, 🪄 Necromancer, 💜 Power Infusion (each priest's targets, most to least), 🪫 Overwritten (a priest's PI replaced by another's), 🧍 Last one standing |
 | 🤡 Lowlights | 🚽 Parse of shame, 🎢 Rollercoaster, 🧽 Damage sponge, 🛡️ Outdamaged by a tank, 💤 Idle (DPS and tanks well under the raid's usual active time) |
 | 💀 Deaths | 💀 Floor inspector, 🐤 Canary, 🎁 Couldn't wait for loot, 🎯 Nemesis, 🧲 Brez magnet, 👻 Ghost (most time spent dead, 3 minutes or more), ⏱️ Speedrunner |
@@ -54,7 +55,8 @@ The thread has seven sections, each its own card, posted only if it has somethin
 in their class colour (shaman blue lifted a little so it reads on the dark background):
 
 - **Parses:** a grid of everyone's parse on every kill, in WCL's colours, with the night's average
-  at the end. Replaces the leaderboard text.
+  at the end. Replaces the leaderboard text. A night that killed bosses on two difficulties gets a
+  grid each, hardest first, since a Heroic 94 and a Mythic 48 aren't the same ladder.
 - **Consumables:** one row per raider (flask, food, weapon oil, pulls potted, potions used, healthstones,
   vantus, rune). Yellow marks what would have been called out, by the same rules as the callouts.
   *Pulls potted* is pulls with at least one potion, out of pulls they were in; *potions used* is
@@ -83,6 +85,9 @@ How the numbers work:
 - **Parses** are each player's average across the night's boss kills, to one decimal. WCL's site
   shows the same average with the decimals dropped, so 88.6 here is an 88 there. DPS and tanks are
   ranked on damage, healers on healing. Tanks are left out of the grey list (they nearly always parse grey on DPS).
+  A player gets one row per role *and* per difficulty: someone who healed Mythic and DPSed Heroic
+  has two averages, each on its own scale, and callouts say which ("95.0 (Mythic)"). A single
+  off-role kill isn't praised or shamed on its own — two or more before it counts.
   They're WCL's numbers at the moment the report is posted. WCL re-ranks every log against everyone
   else's as the tier goes on, so the site's parses drift down a point or two over the following days.
 - **Progression nights** (no kills) swap parses for raw DPS/HPS, divided by the time each person was

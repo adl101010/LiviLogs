@@ -99,7 +99,9 @@ def test_classic_tbc():
     night = analyze(load("classic_tbc"), SETTINGS)
     assert (night.zone, night.difficulty, night.kills, night.wipes) == ("ZA / SWP", 3, 12, 0)
     assert len(night.roster) == 25
-    assert [p.average for p in night.grey] == [4.8, 12.6, 19.4, 22.8, 24.2]
+    # A healer here also DPSed one kill; their healing average stands on its own (5.2, not 4.8
+    # mixed with that kill), and the one-off damage parse isn't shamed.
+    assert [p.average for p in night.grey] == [5.2, 12.6, 19.4, 22.8, 24.2]
     r, text, _ = text_of(night)
     assert "12 bosses down" in r.headline.subtitle
     assert "**🧼 Dispel machine**" in text
@@ -110,7 +112,9 @@ def test_old_shape_without_new_fields_still_works():
     # An earlier fixture from before the report grew: no friendlyPlayers, tables or player details.
     night = analyze(load("retail_heroic"), SETTINGS)
     assert [p.average for p in night.high] == [93.9, 93.7, 92.8]
-    assert len(night.grey) == 16
+    # 17, not 16: a healer who DPSed one kill used to have that 86 lift their healing average
+    # over the grey line. Each role is judged on its own now.
+    assert len(night.grey) == 17
     r, text, _ = text_of(night)
     assert "Top DPS" in card_text(r.headline) and "Floor inspector" in text
 

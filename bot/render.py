@@ -202,8 +202,12 @@ def render_report(
     kind = "Prog report" if prog else "Raid report"
 
     facts = []
-    if night.difficulty in DIFFICULTY:
-        facts.append(DIFFICULTY[night.difficulty])
+    # A night that raided two difficulties names both rather than picking the busier one.
+    named = [DIFFICULTY[d] for d in night.difficulties if d in DIFFICULTY]
+    if len(named) > 1:
+        facts.append(" and ".join([", ".join(named[:-1]), named[-1]] if len(named) > 2 else named))
+    elif named:
+        facts.append(named[0])
     if night.start_ms:
         facts.append(f"<t:{night.start_ms // 1000}:D>")  # shows in each reader's own timezone
     if prog:

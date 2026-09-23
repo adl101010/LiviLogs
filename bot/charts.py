@@ -154,15 +154,17 @@ def _legend(canvas: Canvas, x: int, y: int, items: list[tuple[str, tuple]]) -> N
 
 # --- parses ------------------------------------------------------------------------------------
 
-def parse_chart(night: Night) -> bytes | None:
-    """Everyone's parse on every kill, coloured like WCL, with the night's average at the end."""
-    bosses = [b for b in night.bosses if b.killed]
+def parse_chart(night: Night, difficulty: int | None = None) -> bytes | None:
+    """Everyone's parse on every kill, coloured like WCL, with the night's average at the end. One
+    chart per difficulty when a night raided more than one: the ladders are separate."""
+    bosses = [b for b in night.bosses if b.killed and (difficulty is None or b.difficulty == difficulty)]
     if not night.has_parses or not bosses:
         return None
     names = [b.name for b in bosses]
     rows_by_role = []
     for role, label in ROLE_ORDER:
-        lines = sorted((p for p in night.parses if p.role == role), key=lambda p: -p.average)
+        lines = sorted((p for p in night.parses if p.role == role
+                        and (difficulty is None or p.difficulty == difficulty)), key=lambda p: -p.average)
         if lines:
             rows_by_role.append((label, lines))
 
@@ -176,9 +178,9 @@ def parse_chart(night: Night) -> bytes | None:
     width = max(width, 420)
 
     canvas = Canvas(width, height)
-    difficulty = DIFFICULTY.get(night.difficulty or 0)
+    named = DIFFICULTY.get(difficulty if difficulty is not None else (night.difficulty or 0))
     where = night.zone or night.title
-    _header(canvas, f"Parses · {where}" + (f" ({difficulty})" if difficulty else ""),
+    _header(canvas, f"Parses · {where}" + (f" ({named})" if named else ""),
             f"{len(bosses)} {'kill' if len(bosses) == 1 else 'kills'} · each boss, then the night's average")
 
     x0 = left + name_w
@@ -496,6 +498,8 @@ def draw_charts(night: Night, keys: set[str], settings: RecapSettings) -> dict[s
         try:
             if key == "parses":
                 png = parse_chart(night)
+            elif key.startswith("parses:"):
+                png = parse_chart(night, int(key.split(":", 1)[1]))
             elif key == "consumables":
                 png = consumables_chart(night, settings)
             elif key == "gear":

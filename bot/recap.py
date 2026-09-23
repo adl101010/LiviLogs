@@ -24,6 +24,7 @@ FOOD_PATTERN = "Well Fed"
 VANTUS_PREFIX = "Vantus Rune"
 RETAIL = 1  # WCL's gameVersion for retail; Classic flavours have their own numbers
 MYTHIC_PLUS = 10  # WCL's difficulty for a keystone run
+DIFFICULTY_NAMES = {1: "LFR", 3: "Normal", 4: "Heroic", 5: "Mythic"}
 
 # Letters that don't decompose into base letter + accent.
 _FOLD = str.maketrans({"ø": "o", "æ": "ae", "œ": "oe", "ð": "d", "þ": "th", "ł": "l", "đ": "d"})
@@ -98,10 +99,13 @@ class Boss:
 
 @dataclass
 class ParseLine:
+    """One player's parses on one difficulty, in one role. Someone who swapped roles, or raided two
+    difficulties in a night, gets a line for each: the numbers don't compare across either."""
     char: Char
     average: float  # rounded to 1 decimal. WCL's site shows the same average with the decimals dropped
     role: str
     parses: list[tuple[float, str]]  # (percent, boss) per kill
+    difficulty: int | None = None
 
     @property
     def kills(self) -> int:
@@ -196,6 +200,13 @@ class Night:
     @property
     def wipes(self) -> int:
         return sum(1 for p in self.pulls if not p.kill)
+
+    @property
+    def difficulties(self) -> list[int]:
+        """Difficulties raided tonight, hardest first. More than one when a night runs Heroic
+        bosses and Mythic ones, which are separate ladders and never averaged together."""
+        kills = [p for p in self.pulls if p.kill]
+        return sorted({p.difficulty for p in (kills or self.pulls) if p.difficulty}, reverse=True)
 
     @property
     def difficulty(self) -> int | None:
@@ -321,7 +332,7 @@ def _ranking_fights(rankings) -> list[dict]:
     return rankings if isinstance(rankings, list) else []
 
 
-def _parses(report: dict, players: dict[int, Char]) -> dict[Char, list[tuple[float, str, str]]]:
+def _parses(report: dict, players: dict[int, Char]) -> dict[tuple[Char, str, int | None], list[tuple[float, str]]]:
     realm_by_name: dict[str, set[str]] = defaultdict(set)
     for char in players.values():
         realm_by_name[norm_name(char.name)].add(char.realm)
@@ -331,7 +342,9 @@ def _parses(report: dict, players: dict[int, Char]) -> dict[Char, list[tuple[flo
         (report.get("dpsRankings"), lambda role: role != HEALER),
         (report.get("hpsRankings"), lambda role: role == HEALER),
     ]
-    parses: dict[Char, list[tuple[float, str, str]]] = defaultdict(list)
+    # (player, role, difficulty) -> their parses: WCL ranks every kill on its own difficulty, and
+    # lists a player under the role they played in that kill.
+    parses: dict[tuple[Char, str, int | None], list[tuple[float, str]]] = defaultdict(list)
     for rankings, wanted in sources:
         for fight in _ranking_fights(rankings):
             if fight.get("kill") in (0, False):
@@ -350,20 +363,27 @@ def _parses(report: dict, players: dict[int, Char]) -> dict[Char, list[tuple[flo
                     if not realm:
                         known = realm_by_name.get(norm_name(name), set())
                         realm = next(iter(known)) if len(known) == 1 else ""
-                    parses[Char(name, realm)].append((float(pct), role_key, boss))
+                    key = (Char(name, realm), role_key, fight.get("difficulty"))
+                    parses[key].append((float(pct), boss))
     return parses
 
 
-def _parse_lines(parses: dict[Char, list[tuple[float, str, str]]]) -> list[ParseLine]:
+def _parse_lines(parses: dict[tuple[Char, str, int | None], list[tuple[float, str]]]) -> list[ParseLine]:
     lines = []
-    for char, entries in parses.items():
-        roles = Counter(role for _, role, _ in entries)
-        # A player counts as a tank for the night only if they tanked most of their kills.
-        others = Counter({r: n for r, n in roles.items() if r != TANK})
-        role = TANK if roles[TANK] * 2 > len(entries) or not others else others.most_common(1)[0][0]
-        average = round(sum(pct for pct, _, _ in entries) / len(entries), 1)
-        lines.append(ParseLine(char, average, role, [(pct, boss) for pct, _, boss in entries]))
+    for (char, role, difficulty), entries in parses.items():
+        average = round(sum(pct for pct, _ in entries) / len(entries), 1)
+        lines.append(ParseLine(char, average, role, list(entries), difficulty))
     return lines
+
+
+def _worth_calling(lines: list[ParseLine]) -> list[ParseLine]:
+    """Lines the 90+ and grey callouts may use. Someone who healed all night and DPSed one kill
+    gets a line for that kill too, and a single off-role parse isn't worth shaming or praising."""
+    rows: dict[Char, list[ParseLine]] = defaultdict(list)
+    for line in lines:
+        rows[line.char].append(line)
+    return [line for theirs in rows.values() for line in theirs
+            if len(theirs) == 1 or line.kills >= 2]
 
 
 def _roles(report: dict, players: dict[int, Char], lines: list[ParseLine]) -> dict[Char, str]:
@@ -818,11 +838,11 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
         brezzed=brezzed,
         brez_given=given,
         high=sorted(
-            (p for p in lines if p.average >= settings.parse_high),
+            (p for p in _worth_calling(lines) if p.average >= settings.parse_high),
             key=lambda p: (-p.average, p.char.name.casefold()),
         ),
         grey=sorted(
-            (p for p in lines
+            (p for p in _worth_calling(lines)
              if p.average < settings.parse_grey and (settings.grey_include_tanks or p.role != TANK)),
             key=lambda p: (p.average, p.char.name.casefold()),
         ),

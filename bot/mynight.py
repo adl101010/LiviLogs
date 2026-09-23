@@ -11,7 +11,7 @@ from .awards import (
 )
 from .config import RecapSettings
 from .gear import describe, gear_rows
-from .recap import DPS, HEALER, TANK, Char, Night
+from .recap import DIFFICULTY_NAMES, DPS, HEALER, TANK, Char, Night
 from .render import BLURPLE, Card
 
 ROLE_LABEL = {DPS: "Damage", HEALER: "Healer", TANK: "Tank"}
@@ -34,18 +34,27 @@ def my_night_card(night: Night, lines: list[Line], char: Char, settings: RecapSe
 
 
 def _performance(night: Night, char: Char, role: str) -> str | None:
-    parse = next((p for p in night.parses if p.char == char), None)
-    if parse:
-        kind = "healing" if parse.role == HEALER else "damage"
-        text = f"**📊 {parse.average:.1f} average** {kind} parse"
-        by_boss: dict[str, list[float]] = {}
-        for pct, boss in parse.parses:
-            by_boss.setdefault(boss, []).append(pct)
-        for boss in night.bosses:
-            if boss.name in by_boss:
-                pct = sum(by_boss[boss.name]) / len(by_boss[boss.name])
-                text += f"\n{parse_colour(pct)} - {boss.name} {pct:.0f}"
-        return text
+    # A row per role and difficulty: someone who healed Mythic and DPSed Heroic gets both, since
+    # the two numbers aren't on the same ladder.
+    # Matched on key: WCL spells the realm both ways in one log ("Area 52" in rankings, "Area52"
+    # in the actor list), so the plain Char values don't always compare equal.
+    mine = [p for p in night.parses if p.char.key == char.key]
+    if mine:
+        blocks = []
+        for parse in sorted(mine, key=lambda p: (-(p.difficulty or 0), -p.average)):
+            kind = "healing" if parse.role == HEALER else "damage"
+            name = DIFFICULTY_NAMES.get(parse.difficulty or 0, "")
+            where = f" on {name}" if name and len(night.difficulties) > 1 else ""
+            text = f"**📊 {parse.average:.1f} average** {kind} parse{where}"
+            by_boss: dict[str, list[float]] = {}
+            for pct, boss in parse.parses:
+                by_boss.setdefault(boss, []).append(pct)
+            for boss in night.bosses:
+                if boss.name in by_boss and (parse.difficulty in (None, boss.difficulty)):
+                    pct = sum(by_boss[boss.name]) / len(by_boss[boss.name])
+                    text += f"\n{parse_colour(pct)} - {boss.name} {pct:.0f}"
+            blocks.append(text)
+        return "\n\n".join(blocks)
     rates = [r for r in night.rates if r.role == role]
     mine = next((r for r in rates if r.char == char), None)
     if mine is None:
@@ -179,7 +188,8 @@ def _extras(night: Night, char: Char) -> str | None:
 
 
 def _awards(lines: list[Line], char: Char) -> str | None:
-    titles = list(dict.fromkeys(line.title for line in lines if line.title and char in line.winners))
+    titles = list(dict.fromkeys(line.title for line in lines if line.title
+                                and any(w.key == char.key for w in line.winners)))
     return f"**🏅 In tonight's report** · {', '.join(titles)}" if titles else None
 
 

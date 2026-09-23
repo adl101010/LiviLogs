@@ -122,6 +122,12 @@ How the numbers work:
   all night. "No vantus" only counts pulls where at least half the raid had one. "Died with a
   healthstone in the bag" is anyone who used no healthstone or health potion all night and died at
   least twice.
+- **Dungeons are left out.** A raid log often has a Mythic+ run in it. Those fights (a keystone
+  level, Mythic+ difficulty, or five players) are skipped, and every table, ranking and event the
+  bot reads is asked for the raid's fights only, so no dungeon damage or deaths leak in. The
+  headline says which runs were left out, and the raid's own fights decide the zone name, since a
+  mixed log calls itself "Mythic+ Season 2". A log with no raid bosses gets a short "nothing to
+  report" reply instead.
 - **Retail and Classic.** The bot reads the WCL site from the link (`www.`, `classic.`, `fresh.`,
   `vanilla.`).
 - Logs must be uploaded as **Public or Unlisted**. Private logs can't be read by bots.

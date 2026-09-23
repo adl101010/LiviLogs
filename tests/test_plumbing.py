@@ -35,8 +35,10 @@ def test_parse_character():
 
 
 def test_rankings_args():
-    assert _rankings_args(RecapSettings()) == ""
-    assert _rankings_args(RecapSettings(compare="Parses", timeframe="Today")) == ", compare: Parses, timeframe: Today"
+    fights = "fightIDs: [1, 2]"
+    assert _rankings_args(RecapSettings(), fights) == ", fightIDs: [1, 2]"
+    assert _rankings_args(RecapSettings(compare="Parses", timeframe="Today"), fights) == \
+        ", fightIDs: [1, 2], compare: Parses, timeframe: Today"
 
 
 def test_site_specific_credentials(monkeypatch):

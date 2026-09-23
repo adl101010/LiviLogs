@@ -23,6 +23,7 @@ FLASK_PREFIXES = ("Flask of", "Phial of")
 FOOD_PATTERN = "Well Fed"
 VANTUS_PREFIX = "Vantus Rune"
 RETAIL = 1  # WCL's gameVersion for retail; Classic flavours have their own numbers
+MYTHIC_PLUS = 10  # WCL's difficulty for a keystone run
 
 # Letters that don't decompose into base letter + accent.
 _FOLD = str.maketrans({"ø": "o", "æ": "ae", "œ": "oe", "ð": "d", "þ": "th", "ł": "l", "đ": "d"})
@@ -175,6 +176,7 @@ class Night:
     ran_out: list["RanOut"] = field(default_factory=list)  # flask/food buffs that expired mid-pull
     infusions: list["Infusion"] = field(default_factory=list)  # every Power Infusion, with its window
     pi_overwritten: list["Overwritten"] = field(default_factory=list)  # PI replaced by another priest's
+    dungeons: list[str] = field(default_factory=list)  # dungeon runs in the same log, left out of the report
 
     @property
     def has_parses(self) -> bool:
@@ -219,11 +221,41 @@ def _data(node):
     return node.get("data", node) if isinstance(node, dict) else node
 
 
+def is_dungeon(fight: dict) -> bool:
+    """A Mythic+ or dungeon fight. Raid nights often have a key run in the same log, and none of it
+    belongs in a raid report."""
+    size = fight.get("size")
+    return bool(fight.get("keystoneLevel")) or fight.get("difficulty") == MYTHIC_PLUS or bool(size and size <= 5)
+
+
+def raid_fights(report: dict) -> list[dict]:
+    """Boss pulls from the raid, leaving out dungeon runs in the same log."""
+    return [f for f in report.get("fights") or []
+            if (f.get("encounterID") or 0) > 0 and f.get("id") is not None and not is_dungeon(f)]
+
+
+def _dungeons(report: dict) -> list[str]:
+    """Dungeons run in this log, which the report leaves out."""
+    names = []
+    for f in report.get("fights") or []:
+        name = (f.get("gameZone") or {}).get("name") or f.get("name")
+        if is_dungeon(f) and name and name not in names:
+            names.append(name)
+    return names
+
+
+def _zone(report: dict, fights: list[dict]) -> str | None:
+    """Where the raid was. A log with a key run in it says "Mythic+ Season 2" at the top, so the
+    raid's own fights are asked instead."""
+    names = Counter((f.get("gameZone") or {}).get("name") for f in fights if (f.get("gameZone") or {}).get("name"))
+    if names:
+        return names.most_common(1)[0][0]
+    return (report.get("zone") or {}).get("name")
+
+
 def _pulls(report: dict) -> list[Pull]:
     pulls = []
-    for f in report.get("fights") or []:
-        if (f.get("encounterID") or 0) <= 0 or f.get("id") is None:
-            continue
+    for f in raid_fights(report):
         kill = bool(f.get("kill"))
         boss_pct = f.get("bossPercentage")
         pulls.append(Pull(
@@ -747,7 +779,8 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
 
     return Night(
         title=report.get("title") or "Raid",
-        zone=(report.get("zone") or {}).get("name"),
+        zone=_zone(report, raid_fights(report)),
+        dungeons=_dungeons(report),
         start_ms=int(report.get("startTime") or 0),
         processing=(report.get("exportedSegments") or 0) < (report.get("segments") or 0),
         pulls=pulls,

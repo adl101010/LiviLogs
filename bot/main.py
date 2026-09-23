@@ -677,6 +677,9 @@ async def recap_command(interaction: discord.Interaction, link: str):
     except ReportUnavailable:
         await interaction.followup.send(PRIVATE_LOG.format(url=ref.url), ephemeral=True)
         return
+    except NoRaidBosses:
+        await interaction.followup.send(NO_RAID.format(url=ref.url), ephemeral=True)
+        return
     except (WCLError, httpx.HTTPError) as e:
         await interaction.followup.send(f"❌ Couldn't get that log from Warcraft Logs: {e}", ephemeral=True)
         return

@@ -220,6 +220,9 @@ def render_report(
     notes = []
     if night.processing:
         notes.append("⏳ WCL is still processing this log, so parses may still change.")
+    if night.dungeons:
+        left_out = "dungeon run" if len(night.dungeons) == 1 else "dungeon runs"
+        notes.append(f"🗝️ {len(night.dungeons)} {left_out} in this log left out: {', '.join(night.dungeons)}")
 
     thread: list[Card] = []
     for section, title, accent in SECTIONS:

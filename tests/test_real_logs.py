@@ -42,7 +42,7 @@ def test_guild_kill_night():
     assert "wiped with the boss at **1.5%** in P3" in text  # The Coiled Altar
     assert "**🦶 Kick captain**" in text and "17 interrupts (next best: 8)" in text
     assert "**🧼 Dispel machine**" in text and "177 dispels" in text
-    assert "72M damage (3× the next healer) with a 20.3 healing parse" in text
+    assert "Battle healer" not in text  # dropped: role swappers set it off
     assert "**🎁 Couldn't wait for loot**" in text and "3 deaths each on kills" in text
     assert "Nemesis" not in text  # a three-way tie at 3: nobody stands out
     assert "**👻 Ghost** - " in text and " · spent 8m 47s dead" in text

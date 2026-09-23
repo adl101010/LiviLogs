@@ -454,17 +454,6 @@ class Builder:
             self.add(LOWLIGHTS, [p.char, f" · {lo[0]:.0f} on {lo[1]} but {hi[0]:.0f} on {hi[1]}"],
                      "rollercoaster", [p.char], title="🎢 Rollercoaster")
 
-        healers = sorted(((night.damage_done.get(c, 0), c) for c, r in night.roles.items() if r == HEALER),
-                         key=lambda dc: -dc[0])
-        if len(healers) >= 2 and healers[0][0] >= 1_000_000 and healers[0][0] >= 1.5 * max(healers[1][0], 1):
-            dmg, char = healers[0]
-            ratio = dmg / max(healers[1][0], 1)
-            ratio_text = f"{ratio:.0f}×" if ratio >= 2.95 else f"{ratio:.1f}×"
-            grey = next((p for p in night.grey if p.char == char), None)
-            grey_text = f" with a {grey.average:.1f} healing parse" if grey else ""
-            self.add(LOWLIGHTS, [char, f" · {fmt_big(dmg)} damage ({ratio_text} the next healer){grey_text}"],
-                     "battle_healer", [char], title="⚔️ Battle healer")
-
         taken = sorted(((v, c) for c, v in night.damage_taken.items() if night.roles.get(c) != TANK),
                        key=lambda vc: -vc[0])
         if taken:

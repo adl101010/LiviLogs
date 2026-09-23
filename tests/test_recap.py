@@ -218,7 +218,7 @@ def test_awards():
     assert "**💜 Power Infusion**\n-# Who got it, most to least, all from Healz\n**Pumper** 4" in text
     assert "**💀 Floor inspector**\n-# Deaths before the wipe was called\n**Dyer** 3 · **Greyson** 2" in text
     # Nothing worth saying tonight: these stay silent rather than print a weak line.
-    for quiet in ("Metronome", "Rollercoaster", "Battle healer", "Canary", "Couldn't wait for loot",
+    for quiet in ("Metronome", "Rollercoaster", "Canary", "Couldn't wait for loot",
                   "Speedrunner", "Last one standing", "Wall of the night", "Raid's nemesis", "Wipe starter"):
         assert quiet not in text, quiet
 

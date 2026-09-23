@@ -45,7 +45,7 @@ The thread has seven sections, each its own card, posted only if it has somethin
 | 🗺️ The night | Every boss: kills, pulls, best wipe. A boss-health bar per pull on long progression bosses, time on bosses, 💔 Heartbreaker (closest wipe before a kill), 🧱 Wall of the night, ☠️ Raid's nemesis, 🧨 Wipe starter |
 | 📊 Parses | Everyone's night average by role, in WCL's colours, 👑 on top. On a night with no kills: raw DPS/HPS instead (wipes don't get parses) |
 | 🌟 Highlights | 🩷 Pink parse, 🎵 Metronome, 🦶 Kick captain, 🧼 Dispel machine, 🪄 Necromancer, 💜 Power Infusion (each priest's targets, most to least), 🪫 Overwritten (a priest's PI replaced by another's), 🧍 Last one standing |
-| 🤡 Lowlights | 🚽 Parse of shame, 🎢 Rollercoaster, ⚔️ Battle healer, 🧽 Damage sponge, 🛡️ Outdamaged by a tank, 💤 Idle (DPS and tanks well under the raid's usual active time) |
+| 🤡 Lowlights | 🚽 Parse of shame, 🎢 Rollercoaster, 🧽 Damage sponge, 🛡️ Outdamaged by a tank, 💤 Idle (DPS and tanks well under the raid's usual active time) |
 | 💀 Deaths | 💀 Floor inspector, 🐤 Canary, 🎁 Couldn't wait for loot, 🎯 Nemesis, 🧲 Brez magnet, 👻 Ghost (most time spent dead, 3 minutes or more), ⏱️ Speedrunner |
 | 🧪 Consumables | 🔮 Tryhards (Void-Touched rune), 🍺 Potion seller, 🫗 Mana chugger, 🍪 Cookie monster, 🧪 Potion hoarders, 🪦 Died with a healthstone in the bag, ⚗️ No flask, 🍗 Forgot to eat, 🛢️ No weapon oil, 📜 No vantus, ⌛ Ran out mid-pull (flask or food expired during a pull; weapon oil that ran out between pulls). Retail only |
 | 🛠️ Gear check | A chart of every raider's enchants and gems, then 🔧 Missing enchants, 🎁 Unwrapped loot (new piece worn unenchanted), 💎 Empty sockets. Retail only |

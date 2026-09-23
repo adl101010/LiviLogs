@@ -676,9 +676,9 @@ class Builder:
             for i, r in enumerate(sockets):
                 if i:
                     parts.append(" · ")
-                parts += [r.char, f" {plural(r.empty_sockets, 'empty socket')}"]
+                parts += [r.char, f" {r.gems} of {r.sockets} gemmed"]
             self.add(GEAR, parts, "empty_socket", [r.char for r in sockets], title="💎 Empty sockets",
-                     cluster="calls", stacked=True)
+                     note="Gems worn out of the sockets the log can see", cluster="calls", stacked=True)
 
         if ready == len(rows):
             self.add(GEAR, ["✅ Everyone was fully enchanted and gemmed. Nice."], cluster="calls")

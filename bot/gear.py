@@ -57,6 +57,11 @@ class GearRow:
         return [c for c in self.checks if c.state in (NEW, PARTLY)]
 
     @property
+    def sockets(self) -> int:
+        """Sockets we can prove: every gem sits in one, and every empty socket we can see is one."""
+        return self.gems + self.empty_sockets
+
+    @property
     def ready(self) -> bool:
         return all(c.state == OK for c in self.checks) and not self.empty_sockets
 

@@ -49,7 +49,7 @@ The thread has seven sections, each its own card, posted only if it has somethin
 | 🤡 Lowlights | 🚽 Parse of shame, 🎢 Rollercoaster, 🧽 Damage sponge, 🛡️ Outdamaged by a tank, 💤 Idle (DPS and tanks well under the raid's usual active time) |
 | 💀 Deaths | 💀 Floor inspector, 🐤 Canary, 🎁 Couldn't wait for loot, 🎯 Nemesis, 🧲 Brez magnet, 👻 Ghost (most time spent dead, 3 minutes or more), ⏱️ Speedrunner |
 | 🧪 Consumables | 🔮 Tryhards (Void-Touched rune), 🍺 Potion seller, 🫗 Mana chugger, 🍪 Cookie monster, 🧪 Potion hoarders, 🪦 Died with a healthstone in the bag, ⚗️ No flask, 🍗 Forgot to eat, 🛢️ No weapon oil, 📜 No vantus, ⌛ Ran out mid-pull (flask or food expired during a pull; weapon oil that ran out between pulls). Retail only |
-| 🛠️ Gear check | A chart of every raider's enchants and gems, then 🔧 Missing enchants, 🎁 Unwrapped loot (new piece worn unenchanted), 💎 Empty sockets. Retail only |
+| 🛠️ Gear check | A chart of every raider's enchants and gems, then 🔧 Missing enchants, 🎁 Unwrapped loot (new piece worn unenchanted), 💎 Empty sockets ("4 of 5 gemmed"). Retail only |
 
 **Charts.** Four parts of the thread are pictures the bot draws. In the three grids, names are
 in their class colour (shaman blue lifted a little so it reads on the dark background):
@@ -73,8 +73,10 @@ in their class colour (shaman blue lifted a little so it reads on the dark backg
   weapons for dual-wielders, are split in two, so one bare ring shows. Off hands count only for
   dual-wield specs (or if someone enchanted theirs): shields and held items can't be enchanted.
   The callouts stay as text under the chart so the people who need to fix something get pinged.
-  Empty sockets are found from the item's bonus ids (`SOCKET_BONUS_IDS`); WCL lists gems but not
-  sockets, and sockets added by crafting don't show up, so those can't be checked.
+  The gems column reads "4/5": gems worn out of the sockets to wear them in, amber when one is
+  empty. Sockets are found from the item's bonus ids (`SOCKET_BONUS_IDS`); WCL lists gems but not
+  sockets, and sockets added by crafting don't show up, so those can't be checked. That makes the
+  denominator the sockets the log can prove — every gem is one, plus any empty ones it can see.
 
 A picture can't ping anyone, so a line of @mentions goes under the parse chart instead (unless
 `THREAD_PING_EVERYONE=false`). If Discord refuses a card, the fallback text has the original lines.

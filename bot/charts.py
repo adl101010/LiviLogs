@@ -375,7 +375,8 @@ def gear_chart(night: Night, settings: RecapSettings) -> bytes | None:
     notes = ["Checked on every pull. \"new: 11 pulls\" = a new piece worn unenchanted for 11 pulls; "
              "\"pull 4\" = enchanted from pull 4.",
              "Rings, and weapons for dual-wielders, are split in two: first ring / main hand on the left.",
-             "Gems: sockets the log can see. Sockets added by crafting don't show up, so they can't be checked."]
+             "Gems: gems worn out of the sockets the log can see. Sockets added by crafting don't show up, "
+             "so they can't be checked."]
     name_w = max(text_width(r.char.name, 13) for r in rows) + 14
     cell_w, cell_h, gap = 72, 24, 3
     left, top, header_h = 16, 60, 26
@@ -411,11 +412,11 @@ def gear_chart(night: Night, settings: RecapSettings) -> bytes | None:
             x = x0 + len(row.columns) * (cell_w + gap)
             if row.empty_sockets:
                 canvas.rect(x, y, cell_w, cell_h, WARN_BG)
-                canvas.text(x + cell_w / 2, y + cell_h / 2, f"{row.empty_sockets} empty", 12, WARN, bold=True,
+                canvas.text(x + cell_w / 2, y + cell_h / 2, f"{row.gems}/{row.sockets}", 12, WARN, bold=True,
                             anchor="mm")
             else:
                 canvas.rect(x, y, cell_w, cell_h, CELL)
-                canvas.text(x + cell_w / 2 - 5, y + cell_h / 2, str(row.gems), 12, OK, anchor="rm")
+                canvas.text(x + cell_w / 2 - 5, y + cell_h / 2, f"{row.gems}/{row.sockets}", 12, OK, anchor="rm")
                 _tick(canvas, x + cell_w / 2 + 5, y + cell_h / 2, OK)
             y += cell_h + gap
 

@@ -148,7 +148,7 @@ def _gear(night: Night, char: Char, settings: RecapSettings) -> str | None:
     row = next((r for r in gear_rows(night, settings) if r.char == char), None)
     if row is None:
         return None
-    gems = f"{row.gems} gems" if row.gems != 1 else "1 gem"
+    gems = f"{row.gems}/{row.sockets} gems"
     if row.ready:
         return f"**🛠️ Gear** · ✅ fully enchanted · {gems}"
     bits = []
@@ -158,7 +158,7 @@ def _gear(night: Night, char: Char, settings: RecapSettings) -> str | None:
         slot = describe([check], row)[0]
         bits.append(f"⚠️ {'new ' if check.boss else ''}{slot} unenchanted for {plural(check.bare_pulls, 'pull')}")
     if row.empty_sockets:
-        bits.append(f"⚠️ {plural(row.empty_sockets, 'empty socket')}")
+        bits.append(f"⚠️ {row.gems} of {row.sockets} sockets gemmed")
     late = [c for c in row.checks if c.state == "late"]
     if late and not bits:
         return f"**🛠️ Gear** · ✅ fully enchanted from pull {max(c.from_pull for c in late)} · {gems}"

@@ -130,8 +130,10 @@ def test_empty_sockets_are_called_out():
         edit_gear(data, name, socketed, lambda item, e: item.update(gems=[]))
 
     n = night(pop_gems)
-    assert rows_by_name(n)[name].empty_sockets == 1
-    assert f"**💎 Empty sockets**\n**{name}** 1 empty socket" in gear_text(n)
+    row = rows_by_name(n)[name]
+    assert (row.empty_sockets, row.sockets) == (1, row.gems + 1)
+    assert f"**💎 Empty sockets**\n-# Gems worn out of the sockets the log can see\n" \
+           f"**{name}** {row.gems} of {row.sockets} gemmed" in gear_text(n)
 
 
 def _id(data, name):
@@ -178,7 +180,7 @@ def test_my_night_has_a_gear_line():
     lines = build_lines(n, SETTINGS)
     assert "**🛠️ Gear**\n⚠️ missing enchants: helm, shoulders, boots" in \
         card_text(my_night_card(n, lines, worst.char, SETTINGS, "u"))
-    assert f"**🛠️ Gear** · ✅ fully enchanted · {ready.gems} gems" in \
+    assert f"**🛠️ Gear** · ✅ fully enchanted · {ready.gems}/{ready.sockets} gems" in \
         card_text(my_night_card(n, lines, ready.char, SETTINGS, "u"))
     new = next(r for r in rows if r.unwrapped)
     assert "⚠️ new boots unenchanted for 11 pulls" in card_text(my_night_card(n, lines, new.char, SETTINGS, "u"))

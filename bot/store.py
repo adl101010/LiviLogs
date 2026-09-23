@@ -1,4 +1,4 @@
-"""SQLite: character links, characters seen in logs, report status, and the history of past nights."""
+"""SQLite: character links, characters seen in logs, and report status."""
 
 import json
 import sqlite3
@@ -6,7 +6,6 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 
-from .awards import BossResult
 from .recap import Char, norm_name
 from .wcl import ReportRef
 
@@ -41,15 +40,6 @@ CREATE TABLE IF NOT EXISTS reports (
     posted_at INTEGER,
     characters TEXT,                   -- JSON [[name, realm], ...] from the posted recap
     error TEXT,
-    PRIMARY KEY (host, code)
-);
--- One row per recapped night, for "last raid's best".
-CREATE TABLE IF NOT EXISTS history (
-    host TEXT NOT NULL,
-    code TEXT NOT NULL,
-    start_ms INTEGER NOT NULL,
-    bosses TEXT NOT NULL,              -- JSON [{encounter_id, difficulty, name, killed, boss_pct, phase}]
-    winners TEXT NOT NULL,             -- JSON {award key: [[name, realm], ...]}
     PRIMARY KEY (host, code)
 );
 -- Settings admins change from Discord with /settings.
@@ -263,32 +253,3 @@ class Store:
             "ORDER BY posted_at DESC LIMIT 1"
         ).fetchone()
         return [Char(n, r) for n, r in json.loads(row["characters"])] if row else []
-
-    # --- history -----------------------------------------------------------------------------
-
-    def save_history(self, ref: ReportRef, start_ms: int, bosses: list, winners: dict[str, list[Char]]) -> None:
-        """Re-running a report replaces its row, so history never double counts a night."""
-        boss_json = json.dumps([
-            {"encounter_id": eid, "difficulty": diff, "name": name, "killed": r.killed,
-             "boss_pct": r.boss_pct, "phase": r.phase}
-            for eid, diff, name, r in bosses
-        ])
-        winner_json = json.dumps({key: [[c.name, c.realm] for c in chars] for key, chars in winners.items()})
-        with self._db:
-            self._db.execute(
-                "INSERT OR REPLACE INTO history VALUES (?, ?, ?, ?, ?)",
-                (ref.host, ref.code, start_ms, boss_json, winner_json),
-            )
-
-    def _history_before(self, before_ms: int):
-        # Only nights before this one: re-running an old report compares it with its own past.
-        return self._db.execute(
-            "SELECT bosses, winners FROM history WHERE start_ms < ? ORDER BY start_ms DESC", (before_ms,)
-        )
-
-    def last_result(self, encounter_id: int, difficulty: int | None, before_ms: int) -> BossResult | None:
-        for row in self._history_before(before_ms):
-            for boss in json.loads(row["bosses"]):
-                if boss["encounter_id"] == encounter_id and boss["difficulty"] == difficulty:
-                    return BossResult(boss["killed"], boss["boss_pct"], boss["phase"])
-        return None

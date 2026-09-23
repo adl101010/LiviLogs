@@ -86,7 +86,7 @@ How the numbers work:
   else's as the tier goes on, so the site's parses drift down a point or two over the following days.
 - **Progression nights** (no kills) swap parses for raw DPS/HPS, divided by the time each person was
   actually in pulls; anyone who sat some out gets a "(6 pulls)" note instead of a bad number. The
-  headline shows the best pull and how it compares with last raid's.
+  headline shows the night's best pull.
 - **Idle** is each DPS and tank's WCL "active time" (time spent dealing damage) over their time
   alive in boss pulls. Anyone 10 or more points under the raid's median is called out (up to 3).
   It's compared with the raid rather than a fixed bar because movement-heavy prog wipes pull
@@ -109,8 +109,8 @@ How the numbers work:
   query per report, for just this log's flask and food buffs.
 - **Deaths** count every boss pull, kills and wipes, but only the first 5 deaths of each pull: people
   who die after the wipe is called don't get blamed. Ties are included unless it's a pile-up.
-- **History:** the bot remembers every night it posts, so progression bosses can say "last raid's
-  best: P3 at 44%". Callouts about people are about tonight only.
+- **One night only:** a report is about its own log and nothing else. Nothing is compared with
+  previous raids, and no callout mentions another night.
 - **Every callout checks whether the night gives it something worth saying** and stays silent
   otherwise, so the report is as long as the night was eventful.
 - **Consumables** (retail): flask, food, augment rune and vantus come from the buffs WCL records on
@@ -163,7 +163,6 @@ is only posted once.
 | `/links [member]` | Anyone. Show someone's characters; with no member, list who from the last report isn't linked |
 | `/recap <link>` | Post the report right now, without waiting |
 | `/settings [mentions]` | **Admins.** See the settings, or turn @ mentions on or off: *Off* (the default) shows character names and pings nobody; *On* @ mentions and pings linked raiders |
-| `/recap <link> record_only:True` | Add a past night to history without posting it, so "last raid's best" works from the first real post |
 
 Links are what @ mentions use (when they're on) and what My night uses to find someone's
 characters. With mentions on, unlinked characters appear in bold, with a nudge at the end of the
@@ -205,12 +204,12 @@ In Dockge, create a stack from [`docker-compose.yml`](docker-compose.yml) and fi
 from [`.env.example`](.env.example). Set `TIMEZONE` to the guild's timezone: it's only used for the
 date in thread titles, but a US raid that crosses midnight UTC would otherwise get tomorrow's date.
 It needs no ports: it only makes outbound connections to Discord and Warcraft Logs. Data (links,
-history, which logs were posted) lives in the `livilogs-data` volume.
+characters seen, which logs were posted, settings) lives in the `livilogs-data` volume.
 
 ## Trying it without Discord
 
-`tools/probe.py` pulls real logs through the API and prints exactly what the bot would post. Give it
-several links and it replays them oldest first, so later reports show "last raid's best".
+`tools/probe.py` pulls real logs through the API and prints exactly what the bot would post. Give
+it several links and it prints them oldest first.
 
 ```
 python -m venv .venv

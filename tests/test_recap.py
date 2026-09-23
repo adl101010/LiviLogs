@@ -1,7 +1,7 @@
 from dataclasses import replace
 from zoneinfo import ZoneInfo
 
-from bot.awards import BossResult, build_lines, fmt_health
+from bot.awards import build_lines, fmt_health
 from bot.config import RecapSettings
 from bot.recap import Char, DeathLine, _top_with_ties, analyze, norm_name, norm_realm
 from bot.render import Card, card_text, render_report, split_card, split_message
@@ -16,9 +16,9 @@ def names(lines):
     return [line.char.name for line in lines]
 
 
-def full_text(data=None, settings=SETTINGS, history=None, links=None, tz=ZoneInfo("UTC")):
+def full_text(data=None, settings=SETTINGS, links=None, tz=ZoneInfo("UTC")):
     night = analyze(data or report(), settings)
-    lines = build_lines(night, settings, history)
+    lines = build_lines(night, settings)
     links = links or {}
     return render_report(night, lines, URL, lambda c: links.get(c.name), tz)
 
@@ -314,20 +314,12 @@ def test_featured_boss_for_the_thumbnail():
     assert featured_boss(analyze(data, SETTINGS)) == 3011  # the prog boss
 
 
-class FakeHistory:
-    def __init__(self, last=None):
-        self.last = last
-
-    def last_result(self, encounter_id, difficulty, before_ms):
-        return self.last
-
-
-def test_history_adds_last_raids_progress():
-    history = FakeHistory(last=BossResult(killed=False, boss_pct=44, phase=3))
-    text = all_text(full_text(history=history))
-    assert "**📈 Boss C** - 2 wipes · best P2 at 30% · last raid's best: P3 at 44%" in text
-    assert "**💀 Floor inspector** - **Dyer** 3 deaths\n" in text  # no streaks on people's callouts
-    assert "raids running" not in text
+def test_the_report_is_only_about_tonight():
+    text = all_text(full_text())
+    assert "**📈 Boss C** - 2 wipes · best P2 at 30%" in text  # nothing about last raid's best
+    assert "**💀 Floor inspector** - **Dyer** 3 deaths\n" in text
+    for phrase in ("last raid", "raids running", "last week"):
+        assert phrase not in text
 
 
 def test_thread_title_uses_the_guilds_timezone():

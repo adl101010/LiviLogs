@@ -1,19 +1,16 @@
 """Real logs pulled through the API on 2026-09-18, names replaced by tools/make_fixture.py.
 
 They pin the real JSON shape: if WCL changes it, or a change here breaks reading it, these fail.
-guild_kill and guild_prog are one guild's consecutive nights (Sep 15 and 16), so they also test
-history: "last raid's best".
+guild_kill and guild_prog are one guild's consecutive nights (Sep 15 and 16).
 """
 
 import json
 from pathlib import Path
 
-from bot.awards import boss_results, build_lines, winners_by_key
+from bot.awards import build_lines
 from bot.config import RecapSettings
 from bot.recap import analyze
 from bot.render import card_text, render_report
-from bot.store import Store
-from bot.wcl import ReportRef
 
 FIXTURES = Path(__file__).parent / "fixtures"
 SETTINGS = RecapSettings()
@@ -23,8 +20,8 @@ def load(name):
     return json.loads((FIXTURES / f"{name}.json").read_text(encoding="utf-8"))
 
 
-def text_of(night, history=None):
-    lines = build_lines(night, SETTINGS, history)
+def text_of(night):
+    lines = build_lines(night, SETTINGS)
     r = render_report(night, lines, "u", lambda c: None)
     return r, "\n".join(card_text(c) for c in [r.headline, *r.thread]), lines
 
@@ -90,18 +87,12 @@ def test_guild_prog_night():
     assert " all 15 pulls · " in consumables and " all 6 pulls" in consumables  # no vantus
 
 
-def test_consecutive_nights_build_history():
-    store = Store(":memory:")
+def test_a_report_never_mentions_another_night():
     for name in ("guild_kill", "guild_prog"):
-        night = analyze(load(name), SETTINGS)
-        r, text, lines = text_of(night, store)
-        store.save_history(ReportRef("www.warcraftlogs.com", name), night.start_ms, boss_results(night),
-                           winners_by_key(lines))
-    headline = card_text(r.headline)
-    assert "· last raid's best: P3 at 44%" in headline
-    # The same people won the same callouts both nights; that isn't mentioned.
-    assert "raids running" not in text and "raids running" not in headline
-    assert "10 deaths" in headline and "9 battle rezzes" in text
+        r, text, _ = text_of(analyze(load(name), SETTINGS))
+        whole = card_text(r.headline) + text
+        for phrase in ("last raid", "raids running", "last week", "previous"):
+            assert phrase not in whole, (name, phrase)
 
 
 def test_classic_tbc():

@@ -159,12 +159,13 @@ def test_finished_log_posts_headline_and_thread():
     assert bot.store.pending() == []
 
 
-def test_posting_remembers_the_night_for_next_time():
+def test_posting_remembers_who_raided():
     bot, channel = make_bot(FakeWCL())
     post_link(bot, channel)
-    later = report()["startTime"] + 7 * 86_400_000
-    last = bot.store.last_result(3011, 4, later)
-    assert (last.killed, last.boss_pct, last.phase) == (False, 30, 2)
+    # For /link-raid and the My night button; nothing about the night is kept for later reports.
+    assert [c.name for c in bot.store.last_recap_characters()] == [
+        "Dyer", "Greyson", "Healz", "Middling", "Pumper", "Tanky",
+    ]
 
 
 def test_without_thread_permission_the_report_goes_in_the_channel():

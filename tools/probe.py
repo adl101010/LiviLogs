@@ -2,9 +2,8 @@
 
     python -m tools.probe <warcraftlogs link> [more links...] [--compare]
 
-Reads WCL_CLIENT_ID / WCL_CLIENT_SECRET (and optionally TIMEZONE) from .env. With several links,
-the nights are replayed oldest first into a throwaway history, so later reports show "last raid's
-best" the way the bot would. Nobody is linked, so names print in bold.
+Reads WCL_CLIENT_ID / WCL_CLIENT_SECRET (and optionally TIMEZONE) from .env. Several links are
+printed oldest first. Nobody is linked, so names print in bold.
 
 --compare also prints each player's night average under both WCL parse comparisons (Rankings and
 Parses), for checking against the report page. Raw JSON and the chart pictures are saved to
@@ -18,12 +17,11 @@ import sys
 from dataclasses import replace
 from pathlib import Path
 
-from bot.awards import boss_results, build_lines, winners_by_key
+from bot.awards import build_lines
 from bot.charts import draw_charts
 from bot.config import RecapSettings, _zone
 from bot.recap import analyze
 from bot.render import card_text, render_report
-from bot.store import Store
 from bot.wcl import WCLClient, find_report_links
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -55,7 +53,6 @@ async def main(urls: list[str], show_compare: bool) -> None:
     settings = RecapSettings.from_env()
     tz = _zone("TIMEZONE")
     wcl = WCLClient()
-    history = Store(":memory:")
     try:
         nights = []
         for url in urls:
@@ -71,12 +68,11 @@ async def main(urls: list[str], show_compare: bool) -> None:
             nights.append((ref, analyze(report, settings)))
 
         for ref, night in sorted(nights, key=lambda rn: rn[1].start_ms):
-            lines = build_lines(night, settings, history)
+            lines = build_lines(night, settings)
             charts = draw_charts(night, {line.chart for line in lines if line.chart}, settings)
             for key, png in charts.items():
                 (OUT / ref.code / (key.replace(":", "-") + ".png")).write_bytes(png)
             rendered = render_report(night, lines, ref.url, lambda c: None, tz, charts=charts)
-            history.save_history(ref, night.start_ms, boss_results(night), winners_by_key(lines))
 
             print(f"\n{'=' * 100}\n{ref.url}  (thread: {rendered.thread_title})\n{'=' * 100}")
             print(card_text(rendered.headline))

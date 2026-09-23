@@ -11,7 +11,7 @@ import discord
 import httpx
 from discord import app_commands, ui
 
-from .awards import Line, boss_results, build_lines, winners_by_key
+from .awards import Line, build_lines
 from . import linking
 from .charts import draw_charts
 from .config import Config
@@ -274,7 +274,7 @@ class RecapBot(discord.Client):
     async def build_report(self, ref: ReportRef) -> Built:
         report = await self.wcl.report_full(ref, self.config.recap)
         night = analyze(report, self.config.recap)
-        lines = build_lines(night, self.config.recap, self.store)  # the store remembers past nights
+        lines = build_lines(night, self.config.recap)
         self.store.remember(night.roster)
         self.keep_night(ref, night, lines)
         charts = {}
@@ -310,7 +310,7 @@ class RecapBot(discord.Client):
             if kept is None:
                 report = await self.wcl.report_full(ref, self.config.recap)
                 night = analyze(report, self.config.recap)
-                kept = (night, build_lines(night, self.config.recap, self.store))
+                kept = (night, build_lines(night, self.config.recap))
                 self.keep_night(ref, *kept)
         self._night_locks.pop(ref, None)
         return kept
@@ -326,8 +326,7 @@ class RecapBot(discord.Client):
         return BOSS_ICON.format(boss) if self._icons[boss] else None
 
     def record(self, ref: ReportRef, built: Built, channel_id: int | None) -> None:
-        """Remember the night for next time ("last raid's best")."""
-        self.store.save_history(ref, built.night.start_ms, boss_results(built.night), winners_by_key(built.lines))
+        """Remember who raided, for /link-raid and the My night button."""
         self.store.mark_posted(ref, built.night.roster, channel_id)
 
     async def post_report(self, channel_id: int, reply_to: int | None, rendered: Rendered) -> None:
@@ -657,12 +656,9 @@ async def links_command(interaction: discord.Interaction, member: discord.Member
 
 
 @app_commands.command(name="recap", description="Post the raid report for a Warcraft Logs link right now")
-@app_commands.describe(
-    link="The Warcraft Logs report link",
-    record_only="Only add the night to history (for \"last raid's best\") without posting it",
-)
+@app_commands.describe(link="The Warcraft Logs report link")
 @app_commands.guild_only()
-async def recap_command(interaction: discord.Interaction, link: str, record_only: bool = False):
+async def recap_command(interaction: discord.Interaction, link: str):
     bot = _bot(interaction)
     refs = find_report_links(link)
     if not refs:
@@ -677,8 +673,7 @@ async def recap_command(interaction: discord.Interaction, link: str, record_only
     bot._busy.add(ref)
     try:
         built = await bot.build_report(ref)
-        if not record_only:
-            await bot.post_report(interaction.channel_id, None, built.rendered)
+        await bot.post_report(interaction.channel_id, None, built.rendered)
     except ReportUnavailable:
         await interaction.followup.send(PRIVATE_LOG.format(url=ref.url), ephemeral=True)
         return
@@ -693,5 +688,4 @@ async def recap_command(interaction: discord.Interaction, link: str, record_only
     bot.record(ref, built, interaction.channel_id)
     if pending:
         await bot._react_done(pending, "✅")
-    done = "Added that night to history without posting it." if record_only else "Posted."
-    await interaction.followup.send(done, ephemeral=True)
+    await interaction.followup.send("Posted.", ephemeral=True)

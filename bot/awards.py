@@ -10,7 +10,6 @@ import math
 import statistics
 from collections import Counter
 from dataclasses import dataclass, field
-from typing import Protocol
 
 from .config import RecapSettings
 from .gear import describe, gear_rows
@@ -47,22 +46,6 @@ class Line:
         if self.stacked is not None:
             return self.stacked
         return self.note is not None or len(self.winners) > 1
-
-
-@dataclass(frozen=True)
-class BossResult:
-    killed: bool
-    boss_pct: float | None
-    phase: int | None
-
-
-class History(Protocol):
-    def last_result(self, encounter_id: int, difficulty: int | None, before_ms: int) -> BossResult | None: ...
-
-
-class NoHistory:
-    def last_result(self, encounter_id, difficulty, before_ms):
-        return None
 
 
 # --- formatting --------------------------------------------------------------------------------
@@ -169,10 +152,9 @@ PHASE_BARS = "▁▂▃▄▅▆▇█"
 
 
 class Builder:
-    def __init__(self, night: Night, settings: RecapSettings, history: History):
+    def __init__(self, night: Night, settings: RecapSettings):
         self.night = night
         self.settings = settings
-        self.history = history
         self.lines: list[Line] = []
 
     def add(self, section: str, parts: list[Part], key: str | None = None,
@@ -223,14 +205,13 @@ class Builder:
         prog_night = not self.night.kills
         for boss in unkilled:
             best = boss.best_wipe
-            last_note = self.last_raid(boss)
             if prog_night and len(unkilled) == 1:
                 final = " · the last pull of the night" if best is boss.pulls[-1] and len(boss.pulls) > 1 else ""
-                self.add(HEADLINE, [f"{fmt_health(best.boss_pct, best.phase)}{final}{last_note}"],
+                self.add(HEADLINE, [f"{fmt_health(best.boss_pct, best.phase)}{final}"],
                          title="📈 Best pull", cluster="tops")
             else:
                 best_text = f" · best {fmt_health(best.boss_pct, best.phase)}" if best else ""
-                self.add(HEADLINE, [f"{plural(len(boss.wipes), 'wipe')}{best_text}{last_note}"],
+                self.add(HEADLINE, [f"{plural(len(boss.wipes), 'wipe')}{best_text}"],
                          title=f"📈 {boss.name}", cluster="tops")
 
     def top_line(self, title: str, key: str, chars: list[Char], value: str) -> None:
@@ -245,14 +226,6 @@ class Builder:
             kind = "healing" if p.role == HEALER else "damage"
             parts += [p.char, f" {kind} {p.average:.1f}"]
         return parts
-
-    def last_raid(self, boss: Boss) -> str:
-        last = self.history.last_result(boss.encounter_id, boss.difficulty, self.night.start_ms)
-        if last is None:
-            return ""
-        if last.killed:
-            return " · killed it last raid"
-        return f" · last raid's best: {fmt_health(last.boss_pct, last.phase)}"
 
     # --- the night -----------------------------------------------------------------------------
 
@@ -961,8 +934,8 @@ def consumable_rows(night: Night, settings: RecapSettings) -> list[ConsumableRow
                   key=lambda r: (order.get(r.role, 3), r.char.name.casefold()))
 
 
-def build_lines(night: Night, settings: RecapSettings, history: History | None = None) -> list[Line]:
-    builder = Builder(night, settings, history or NoHistory())
+def build_lines(night: Night, settings: RecapSettings) -> list[Line]:
+    builder = Builder(night, settings)
     builder.headline()
     builder.the_night()
     builder.board()
@@ -976,15 +949,3 @@ def build_lines(night: Night, settings: RecapSettings, history: History | None =
 
 def winners_by_key(lines: list[Line]) -> dict[str, list[Char]]:
     return {line.key: line.winners for line in lines if line.key and line.winners}
-
-
-def boss_results(night: Night) -> list[tuple[int, int | None, str, BossResult]]:
-    results = []
-    for boss in night.bosses:
-        best = boss.best_wipe
-        results.append((boss.encounter_id, boss.difficulty, boss.name, BossResult(
-            killed=boss.killed,
-            boss_pct=None if boss.killed or not best else best.boss_pct,
-            phase=None if boss.killed or not best else best.phase,
-        )))
-    return results

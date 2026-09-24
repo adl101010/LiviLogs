@@ -13,7 +13,9 @@ from typing import Callable
 import httpx
 
 from .config import RecapSettings, wcl_credentials
-from .recap import FLASK_PREFIXES, FOOD_PATTERN, MANA_POTION_PATTERN, is_dungeon
+from .recap import (
+    CREATE_HEALTHSTONE, FLASK_PREFIXES, FOOD_PATTERN, MANA_POTION_PATTERN, is_dungeon, is_health_item,
+)
 
 log = logging.getLogger(__name__)
 
@@ -89,7 +91,8 @@ query Fights($code: String!) {
 # - Deaths come from the events feed, not the deaths table: the table silently stops at 200.
 # - Wipes have no parses, so prog nights use the damage/healing tables instead.
 # - Consumables: combatantInfo is each player's buffs at the start of every pull (flask, food, rune,
-#   vantus); combat potions are their buffs; healthstones and health/mana potions are casts.
+#   vantus); combat potions are their buffs. Healthstones and health/mana potions are casts, and
+#   come from the events feed: the casts table only lists the top five users of each ability.
 _FULL_QUERY = """
 query Recap($code: String!) {
   reportData {
@@ -115,7 +118,6 @@ query Recap($code: String!) {
       potionEvents: events(filterExpression: "%(potion_filter)s", %(night)s, limit: 10000) {
         data nextPageTimestamp
       }
-      casts: table(dataType: Casts, viewBy: Ability, %(night)s)
       powerInfusion: events(filterExpression: "%(pi_filter)s", %(night)s, limit: 10000) {
         data nextPageTimestamp
       }
@@ -162,6 +164,10 @@ _EVENT_PAGES = {
         "params": "$code: String!, $start: Float!",
         "filter": "filterExpression: \"%(mana_filter)s\", %(fights)s",
     },
+    "healthItemEvents": {
+        "params": "$code: String!, $start: Float!",
+        "filter": "filterExpression: \"%(health_filter)s\", %(fights)s",
+    },
     "buffEndEvents": {
         "params": "$code: String!, $start: Float!",
         "filter": "filterExpression: \"%(buff_end_filter)s\", %(fights)s",
@@ -190,6 +196,21 @@ def _mana_potion_filter(report: dict) -> str | None:
     abilities = (report.get("masterData") or {}).get("abilities") or []
     ids = sorted({a["gameID"] for a in abilities
                   if MANA_POTION_PATTERN in (a.get("name") or "") and isinstance(a.get("gameID"), int)})
+    if not ids:
+        return None
+    return f"type = 'cast' and ability.id in ({', '.join(map(str, ids))})"
+
+
+# Healthstones and health potions are fetched the same way, and for a second reason: the casts
+# table only ever lists the top five users of an ability, so everyone else read as zero and got
+# called out for never using one.
+def _health_item_filter(report: dict, settings: RecapSettings) -> str | None:
+    """WCL filter for casts of any healthstone or health potion in this report, or None if none.
+    "Create Healthstone" is the warlock making them, not anyone using one."""
+    abilities = (report.get("masterData") or {}).get("abilities") or []
+    ids = sorted({a["gameID"] for a in abilities
+                  if isinstance(a.get("gameID"), int) and (a.get("name") or "") != CREATE_HEALTHSTONE
+                  and is_health_item(a.get("name") or "", settings.extra_health_items)})
     if not ids:
         return None
     return f"type = 'cast' and ability.id in ({', '.join(map(str, ids))})"
@@ -326,7 +347,13 @@ class WCLClient:
                            ("combatantInfo", "combatantInfo"), ("potionEvents", "potions"),
                            ("powerInfusion", "powerInfusion")):
             report[key] = await self._all_events(ref, report.pop(field, None), field, variables, filters)
-        # Mana potions per pull: a second, small query, and only if the log has any.
+        # Healthstones, health potions and mana potions: small follow-up queries, since their
+        # ability ids have to be read out of the report first.
+        filters["health_filter"] = _health_item_filter(report, settings)
+        report["healthItems"] = (
+            await self._all_events(ref, {"nextPageTimestamp": 0}, "healthItemEvents", variables, filters)
+            if filters["health_filter"] else []
+        )
         report["manaPotions"] = (
             await self._all_events(ref, {"nextPageTimestamp": 0}, "manaPotionEvents", variables, filters)
             if filters["mana_filter"] else []

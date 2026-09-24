@@ -98,17 +98,12 @@ def _potions():
             for pid, fights in drank.items() for f in fights]
 
 
-def _cast_table():
-    def entry(name, **by_player):
-        return {"name": name, "guid": sum(map(ord, name)), "total": sum(by_player.values()),
-                "sources": [{"name": n, "total": t} for n, t in by_player.items()]}
-    return {"data": {"gameVersion": 1, "entries": [
-        entry("Healthstone", Pumper=1, Dyer=2),
-        entry("Silvermoon Health Potion", Middling=10),
-        entry("Lightfused Mana Potion", Healz=4),
-        entry("Potion of Recklessness", Pumper=6),  # a combat potion: counted from buffs, not here
-        entry("Fortifying Brew", Greyson=5),  # a class ability, not a consumable
-    ]}}
+def _health_items():
+    """Healthstone and health potion casts, per pull: Pumper 1, Dyer 2, Middling 10. The client
+    filters these by ability id, so only the raid's own casts ever arrive."""
+    used = {3: [(1, 1)], 5: [(2, 1), (3, 1)], 6: [(f, 2) for f in BOSS_PULLS]}
+    return [{"type": "cast", "sourceID": pid, "fight": fight, "abilityGameID": 6262}
+            for pid, pulls in used.items() for fight, times in pulls for _ in range(times)]
 
 
 def _casts(**counts):
@@ -201,5 +196,5 @@ def report():
         "buffEnds": [_buff_end(3, 6, 1_100_000, "Flask of the Magisters"),
                      _buff_end(5, 1, 40_100, "Hearty Well Fed")]
                     + [_buff_end(pid, 6, 1_150_000 + pid * 1000, "Hearty Well Fed") for pid in (1, 2, 3, 5, 6)],
-        "casts": _cast_table(),
+        "healthItems": _health_items(),
     }

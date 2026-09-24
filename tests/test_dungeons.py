@@ -39,13 +39,13 @@ def test_a_mixed_log_reports_only_the_raid():
     assert not any("Rest" in b.name or "Nalorakk" in b.name for b in night.bosses)
     # The report's own zone says "Mythic+ Season 2"; the raid's fights say where the raid was.
     assert night.zone == "The Venomous Abyss"
-    assert night.dungeons == ["Kings' Rest", "Den of Nalorakk"]
+    assert night.dungeons == ["Kings' Rest", "Den of Nalorakk", "Temple of Sethraliss"]
 
 
 def test_the_headline_says_what_was_left_out():
     night = analyze(mixed(), SETTINGS)
     rendered = render_report(night, build_lines(night, SETTINGS), "u", lambda c: None)
-    assert "🗝️ 2 dungeon runs in this log left out: Kings' Rest, Den of Nalorakk" in rendered.headline.footer
+    assert "🗝️ 3 dungeon runs in this log left out: Kings' Rest, Den of Nalorakk, Temple of Sethraliss" in rendered.headline.footer
     whole = "\n".join(card_text(c) for c in [rendered.headline, *rendered.thread])
     assert "Kings' Rest" in rendered.headline.footer and whole.count("Kings' Rest") == 1
 

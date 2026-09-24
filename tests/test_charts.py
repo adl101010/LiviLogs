@@ -41,16 +41,16 @@ def test_kill_night_draws_parses_consumables_and_the_prog_boss():
     night = load("guild_kill")
     lines = build_lines(night, SETTINGS)
     # Ula'tek (8 wipes) gets a progress chart; bosses killed in 1-3 pulls don't.
-    assert chart_keys(lines) == {"parses", "consumables", "progress:7"}
+    assert chart_keys(lines) == {"parses", "consumables", "gear", "progress:7"}
     charts = draw_charts(night, chart_keys(lines), SETTINGS)
-    assert set(charts) == {"parses", "consumables", "progress:7"}
+    assert set(charts) == {"parses", "consumables", "gear", "progress:7"}
     assert all(png.startswith(PNG) for png in charts.values())
 
 
 def test_prog_night_has_no_parse_chart():
     night = load("guild_prog")
     keys = chart_keys(build_lines(night, SETTINGS))
-    assert keys == {"consumables", "progress:0"}  # wipes have no parses; the throughput stays text
+    assert keys == {"consumables", "gear", "progress:0"}  # wipes have no parses; throughput stays text
 
 
 def test_classic_has_parses_but_no_consumables():

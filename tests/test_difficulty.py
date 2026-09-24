@@ -39,7 +39,7 @@ def test_a_player_gets_a_line_per_role_and_difficulty():
     n = night()
     swapper = [p for p in n.parses if p.char.name == "P-c016da"]
     assert sorted((p.role, p.difficulty, round(p.average, 1)) for p in swapper) == [
-        ("dps", 4, 85.3), ("healers", 5, 50.5),
+        ("dps", 4, 84.3), ("healers", 5, 49.0),
     ]
     # Every line's parses come from that difficulty's kills only.
     for p in n.parses:
@@ -52,8 +52,8 @@ def test_callouts_say_which_difficulty():
     r, _ = report(n)
     head = card_text(r.headline)
     assert r.headline.subtitle.startswith("Mythic and Heroic")
-    assert "**🏆 Top DPS** - **P-6aead5** 96.3 (Heroic)" in head
-    assert "**P-4da6a0** damage 95.0 (Mythic)" in head  # 90+, tagged per line
+    assert "**🏆 Top DPS** - **P-6aead5** 96.0 (Heroic)" in head
+    assert "**P-4da6a0** damage 93.5 (Mythic)" in head  # 90+, tagged per line
     assert "**P-a15cd2** healing 6.0 (Mythic)" in head  # grey, on the Mythic ladder only
 
 
@@ -73,8 +73,8 @@ def test_one_parse_grid_per_difficulty():
     assert titles == ["⚔️ Damage · Mythic", "💚 Healing · Mythic", "🛡️ Tanks · Mythic",
                       "⚔️ Damage · Heroic", "💚 Healing · Heroic", "🛡️ Tanks · Heroic"]
     # The swapper is a healer on one grid and a DPS on the other, never averaged together.
-    assert "**P-c016da** **50.5**" in board.blocks[1]
-    assert "**P-c016da** 85.3" in board.blocks[3]
+    assert "**P-c016da** **49.0**" in board.blocks[1]
+    assert "**P-c016da** 84.3" in board.blocks[3]
 
 
 def test_charts_are_drawn_one_per_difficulty():
@@ -93,7 +93,7 @@ def test_my_night_lists_every_row_the_player_has():
     lines = build_lines(n, SETTINGS)
     char = next(c for c in n.roster if c.name == "P-c016da")
     text = card_text(my_night_card(n, lines, char, SETTINGS, "u"))
-    assert "**📊 50.5 average** healing parse on Mythic" in text
-    assert "**📊 85.3 average** damage parse on Heroic" in text
+    assert "**📊 49.0 average** healing parse on Mythic" in text
+    assert "**📊 84.3 average** damage parse on Heroic" in text
     assert text.index("healing parse") < text.index("damage parse")  # hardest first
     assert text.count("Nek'zali the Soulcoiler") == 2  # once under each block, different numbers

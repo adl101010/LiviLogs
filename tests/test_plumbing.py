@@ -131,7 +131,7 @@ def test_mana_potion_filter_uses_the_logs_own_ability_ids():
     assert _mana_potion_filter({"masterData": {"abilities": []}}) is None
 
 
-def test_mana_potions_per_pull_replace_the_cast_table_count():
+def test_mana_potions_are_counted_per_pull():
     from bot.config import RecapSettings
     from bot.recap import analyze
 
@@ -143,6 +143,6 @@ def test_mana_potions_per_pull_replace_the_cast_table_count():
     assert night.mana_by_pull[healz] == {1: 1, 5: 1, 6: 2}
     assert night.mana_potions[healz] == 4
 
-    del data["manaPotions"]  # a report saved before per-pull mana potions: the table total still works
+    del data["manaPotions"]  # an older report: no mana potions rather than a half-known count
     night = analyze(data, RecapSettings())
-    assert night.mana_by_pull == {} and night.mana_potions[healz] == 4
+    assert night.mana_by_pull == {} and not night.mana_potions

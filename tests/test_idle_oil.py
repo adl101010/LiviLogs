@@ -47,7 +47,7 @@ def test_no_weapon_oil_callout_and_grid_column_agree():
 
 
 def test_logs_without_gear_have_no_oil_column_or_callout():
-    night = load("guild_kill")  # saved before gear was kept
+    night = load("retail_heroic")  # saved before gear was kept
     assert all(r.oil_pulls == 0 and "no_oil" not in r.flags for r in consumable_rows(night, SETTINGS))
     assert "No weapon oil" not in thread_text(night)
 

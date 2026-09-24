@@ -125,7 +125,10 @@ How the numbers work:
   otherwise, so the report is as long as the night was eventful.
 - **Consumables** (retail): flask, food, augment rune and vantus come from the buffs WCL records on
   each player as every pull starts. Combat potions are counted per pull; healthstones and
-  health/mana potions from casts. DPS and tanks are potion hoarders if they skipped a combat potion
+  health/mana potions come from cast **events**, per pull, not from the casts table — that table
+  lists only an ability's top five users, so everyone else read as zero and got called out for
+  never using one. `Create Healthstone` is the warlock making them, and doesn't count as using one.
+  DPS and tanks are potion hoarders if they skipped a combat potion
   on more than half their pulls; healers only if they drank no potion of any kind (combat or mana)
   all night. "No vantus" only counts pulls where at least half the raid had one. "Died with a
   healthstone in the bag" is anyone who used no healthstone or health potion all night and died at

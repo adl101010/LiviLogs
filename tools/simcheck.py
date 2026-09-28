@@ -146,15 +146,29 @@ def profile(char: Char, info: dict, race: str, ilvl: int | None, traits: list | 
 # --- the sim --------------------------------------------------------------------------------
 
 def run_simc(simc: str, path: Path, seconds: float, iterations: int) -> float | None:
+    """One sim. Whatever goes wrong, say what simc actually said: a silent zero in the table is
+    worse than no table at all."""
     out = path.with_suffix(".json")
+    log = path.with_suffix(".log")
     command = [simc, str(path), f"iterations={iterations}", f"max_time={seconds:.0f}",
-               "fight_style=Patchwerk", "single_actor_batch=1", f"json2={out}"]
+               "fight_style=Patchwerk", f"json2={out}"]
     try:
-        subprocess.run(command, check=True, capture_output=True, timeout=900)
+        done = subprocess.run(command, capture_output=True, text=True, timeout=900)
+    except (subprocess.SubprocessError, OSError) as err:
+        print(f"    simc didn't run: {err}\n    {' '.join(command)}", file=sys.stderr)
+        return None
+    output = (done.stdout or "") + (done.stderr or "")
+    log.write_text(output, encoding="utf-8")
+    if done.returncode != 0:
+        lines = [line for line in output.splitlines() if line.strip()][-4:]
+        print(f"    simc exited {done.returncode} on {path.name} · full output in {log.name}",
+              *(f"      {line}" for line in lines), sep="\n", file=sys.stderr)
+        return None
+    try:
         data = json.loads(out.read_text(encoding="utf-8"))
         return data["sim"]["players"][0]["collected_data"]["dps"]["mean"]
-    except (subprocess.SubprocessError, OSError, KeyError, ValueError) as err:
-        print(f"    simc failed for {path.name}: {err}", file=sys.stderr)
+    except (OSError, KeyError, IndexError, ValueError) as err:
+        print(f"    simc ran but gave no dps for {path.name}: {err} · output in {log.name}", file=sys.stderr)
         return None
 
 
@@ -203,6 +217,7 @@ def main(url: str, min_alive: float, iterations: int, simc: str | None, traits_p
     snapshots = {(e.get("fight"), e.get("sourceID")): e for e in report.get("combatantInfo") or []}
     races = json.loads(RACES.read_text(encoding="utf-8")) if RACES.exists() else {}
     traits = trait_table(traits_path, simc)
+    failures = 0  # three sims in a row failing is a setup problem, not 24 unlucky profiles
     print(f"talents: {'from the log, encoded against ' + str(len(traits)) + ' trait rows' if traits else 'OFF — no trait table, sims will use no talents at all'}")
     with_talents = 0
 
@@ -231,7 +246,13 @@ def main(url: str, min_alive: float, iterations: int, simc: str | None, traits_p
             with_talents += talented
             path = out / f"{pull.id}-{char.name}.simc"
             path.write_text(text, encoding="utf-8")
-            simmed = run_simc(simc, path, pull.seconds, iterations) if simc else None
+            simmed = None
+            if simc and failures < 3:
+                simmed = run_simc(simc, path, pull.seconds, iterations)
+                failures = 0 if simmed else failures + 1
+                if failures == 3:
+                    print("    three sims failed in a row — stopping there; the profiles are still written",
+                          file=sys.stderr)
             rows.append((char.name, share, real.get(char.name), simmed))
         for name, share, mine, simmed in sorted(rows, key=lambda r: -(r[3] and r[2] / r[3] or 0)):
             ratio = f"{mine / simmed * 100:.0f}%" if simmed and mine else "-"

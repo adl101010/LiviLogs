@@ -6,3 +6,5 @@ data/
 *.sqlite3
 # Raw JSON from real guild logs: character names, keep out of the repo
 tools/probe-out/
+# Generated SimC profiles: real character names, keep out of the repo
+tools/simcheck-out/

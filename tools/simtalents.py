@@ -131,12 +131,21 @@ def encode(picks: dict[int, tuple[int | None, int]], spec_id: int, traits: list[
             writer.write(0, 1)
             continue
         entry_id, rank = pick
+        index = next((i for i, t in enumerate(entries) if t.entry == entry_id or t.spell == entry_id), 0)
+        choice = len(entries) > 1 and entries[0].node_type != NODE_TIERED
+        # A tiered node's ranks spill across its entries, so its maximum is their sum; a choice
+        # node's is whichever side was taken.
+        full = (sum(t.max_ranks for t in entries) if entries[0].node_type == NODE_TIERED
+                else entries[index if choice else 0].max_ranks)
+        rank = min(rank, full)
         writer.write(1, 1)  # selected
         writer.write(1, 1)  # purchased, rather than granted for free
-        writer.write(1, 1)  # the rank is spelled out
-        writer.write(min(rank, 63), 6)
-        index = next((i for i, t in enumerate(entries) if t.entry == entry_id or t.spell == entry_id), 0)
-        if len(entries) > 1 and entries[0].node_type != NODE_TIERED:
+        if rank < full:
+            writer.write(1, 1)  # a partial rank, spelled out. simc refuses this flag on a full one
+            writer.write(rank, 6)
+        else:
+            writer.write(0, 1)
+        if choice:
             writer.write(1, 1)  # a choice node: say which side
             writer.write(min(index, 3), 2)
         else:

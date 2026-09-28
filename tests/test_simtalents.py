@@ -67,3 +67,23 @@ def test_a_line_is_only_returned_when_it_decodes_back():
         talents_line([], FIRE, TRAITS)  # the log recorded no talents
     with pytest.raises(TalentError):
         talents_line([{"nodeID": 7777, "id": 1, "rank": 1}], FIRE, TRAITS)  # nodes this build lacks
+
+
+def test_a_full_rank_is_not_marked_partial():
+    """simc refuses a partial-rank flag on a node that's fully ranked: 'Partial rank for node N but
+    all 1 ranks are allocated'. A full pick says nothing about its rank and lets simc use the max."""
+    full = encode({100: (1001, 2)}, FIRE, TRAITS)   # node 100 has 2 ranks
+    partial = encode({100: (1001, 1)}, FIRE, TRAITS)
+    assert decode(full, TRAITS) == {100: 2} and decode(partial, TRAITS) == {100: 1}
+    assert len(full) < len(partial)  # the partial one carries 7 more bits
+
+
+def test_a_tiered_node_is_full_when_every_entry_is_ranked():
+    both = encode({300: (1004, 2)}, FIRE, TRAITS)  # two entries, one rank each
+    one = encode({300: (1004, 1)}, FIRE, TRAITS)
+    assert decode(both, TRAITS) == {300: 2} and decode(one, TRAITS) == {300: 1}
+    assert len(both) < len(one)
+
+
+def test_a_rank_above_the_maximum_is_clamped():
+    assert decode(encode({100: (1001, 9)}, FIRE, TRAITS), TRAITS) == {100: 2}

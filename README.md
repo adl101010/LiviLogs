@@ -261,6 +261,13 @@ python -m tools.simcheck https://www.warcraftlogs.com/reports/<code> --simc /pat
 Nothing in the bot calls it yet. Without `--simc` (or `SIMC_PATH`) it writes the profiles to
 `tools/simcheck-out/` (git-ignored: character names) and leaves the sim column empty.
 
+**Fight style per boss** lives in [`tools/sim-fights.json`](tools/sim-fights.json), keyed by WCL
+encounter id or boss name with `default` as the fallback: `{"style": "HecticAddCleave",
+"targets": 1}` for a boss with adds, `{"style": "LightMovement", "targets": 2}` for two bosses you
+walk between. `extra` takes raw simc lines (`raid_events+=/movement,cooldown=30,duration=5`).
+Fight length always comes from the real kill, so it's never set here. A style shifts the whole
+sim baseline, so ratios compare within a boss, not across two bosses simmed differently.
+
 **Talents** come out of the log as node ids and ranks, not the loadout string simc wants, so
 `tools/simtalents.py` encodes one — the bit layout is simc's own `parse_traits_hash()` run
 backwards, against that build's `engine/dbc/generated/trait_data.inc`. The file is found next to

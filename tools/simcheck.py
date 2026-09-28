@@ -35,6 +35,7 @@ from tools.probe import load_env
 ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "tools" / "simcheck-out"
 RACES = ROOT / "tools" / "sim-races.json"
+FIGHTS = ROOT / "tools" / "sim-fights.json"
 
 LEVEL = 90  # Midnight's cap; a sim at the wrong level is wrong by miles
 DEFAULT_RACE = {1: "human", 2: "orc", 0: "human"}  # WCL faction id -> a middling racial
@@ -145,13 +146,36 @@ def profile(char: Char, info: dict, race: str, ilvl: int | None, traits: list | 
 
 # --- the sim --------------------------------------------------------------------------------
 
-def run_simc(simc: str, path: Path, seconds: float, iterations: int) -> float | None:
+def fight_options(boss: str, encounter_id: int, styles: dict) -> list[str]:
+    """simc options for this boss: how the fight goes, and how many things are in it.
+
+    tools/sim-fights.json is keyed by encounter id or boss name, with "default" as the fallback:
+      {"3379": {"style": "HecticAddCleave", "targets": 1},
+       "The Lost Explorers": {"style": "LightMovement", "targets": 2},
+       "default": {"style": "Patchwerk"}}
+    `extra` takes any other simc lines ("raid_events+=/movement,cooldown=30,duration=5").
+    """
+    entry = styles.get(str(encounter_id)) or styles.get(boss) or styles.get("default") or {}
+    options = [f"fight_style={entry.get('style', 'Patchwerk')}"]
+    if entry.get("targets"):
+        options.append(f"desired_targets={int(entry['targets'])}")
+    options += [str(line) for line in entry.get("extra") or []]
+    return options
+
+
+def describe_fight(options: list[str]) -> str:
+    style = next((o.split("=", 1)[1] for o in options if o.startswith("fight_style=")), "Patchwerk")
+    targets = next((o.split("=", 1)[1] for o in options if o.startswith("desired_targets=")), "1")
+    return f"{style}, {targets} target" + ("s" if targets != "1" else "")
+
+
+def run_simc(simc: str, path: Path, seconds: float, iterations: int, fight: list[str]) -> float | None:
     """One sim. Whatever goes wrong, say what simc actually said: a silent zero in the table is
     worse than no table at all."""
     out = path.with_suffix(".json")
     log = path.with_suffix(".log")
     command = [simc, str(path), f"iterations={iterations}", f"max_time={seconds:.0f}",
-               "fight_style=Patchwerk", f"json2={out}"]
+               *fight, f"json2={out}"]
     try:
         done = subprocess.run(command, capture_output=True, text=True, timeout=900)
     except (subprocess.SubprocessError, OSError) as err:
@@ -216,6 +240,7 @@ def main(url: str, min_alive: float, iterations: int, simc: str | None, traits_p
         rezzes[(event.get("fight"), event.get("targetID"))].append(event.get("timestamp"))
     snapshots = {(e.get("fight"), e.get("sourceID")): e for e in report.get("combatantInfo") or []}
     races = json.loads(RACES.read_text(encoding="utf-8")) if RACES.exists() else {}
+    styles = json.loads(FIGHTS.read_text(encoding="utf-8")) if FIGHTS.exists() else {}
     traits = trait_table(traits_path, simc)
     failures = 0  # three sims in a row failing is a setup problem, not 24 unlucky profiles
     print(f"talents: {'from the log, encoded against ' + str(len(traits)) + ' trait rows' if traits else 'OFF — no trait table, sims will use no talents at all'}")
@@ -227,7 +252,8 @@ def main(url: str, min_alive: float, iterations: int, simc: str | None, traits_p
         if not pull.kill:
             continue  # a wipe is people dying: almost nobody clears the gate, and the DPS means less
         real = actual_dps(report, pull.id)
-        print(f"\n{pull.boss} · {int(pull.seconds // 60)}m{int(pull.seconds % 60):02d}s")
+        fight = fight_options(pull.boss, pull.encounter_id, styles)
+        print(f"\n{pull.boss} · {int(pull.seconds // 60)}m{int(pull.seconds % 60):02d}s · {describe_fight(fight)}")
         print(f"    {'raider':16}{'alive':>7}{'actual':>10}{'sim':>10}{'of sim':>9}")
         rows = []
         for char in sorted(night.roster, key=lambda c: c.name.casefold()):
@@ -248,7 +274,7 @@ def main(url: str, min_alive: float, iterations: int, simc: str | None, traits_p
             path.write_text(text, encoding="utf-8")
             simmed = None
             if simc and failures < 3:
-                simmed = run_simc(simc, path, pull.seconds, iterations)
+                simmed = run_simc(simc, path, pull.seconds, iterations, fight)
                 failures = 0 if simmed else failures + 1
                 if failures == 3:
                     print("    three sims failed in a row — stopping there; the profiles are still written",

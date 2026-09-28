@@ -1,0 +1,8 @@
+{
+  "_comment": "How each boss is simmed. Keys are WCL encounter ids or boss names; 'default' covers the rest. style is any simc fight_style (Patchwerk, CastingPatchwerk, HecticAddCleave, LightMovement, HeavyMovement, DungeonSlice, Beastlord); targets sets desired_targets; extra takes raw simc lines. max_time always comes from the real kill, so it isn't set here.",
+
+  "default": { "style": "Patchwerk", "targets": 1 },
+
+  "Nymrissa Wavecaller": { "style": "HecticAddCleave", "targets": 1 },
+  "The Lost Explorers": { "style": "LightMovement", "targets": 2 }
+}

@@ -29,6 +29,7 @@ from pathlib import Path
 from bot.config import RecapSettings
 from bot.recap import DPS, Char, Night, Pull, analyze
 from bot.wcl import WCLClient, find_report_links
+from tools import simtalents
 from tools.probe import load_env
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -110,27 +111,36 @@ def gear_lines(gear: list) -> list[str]:
     return lines
 
 
-def profile(char: Char, info: dict, race: str, ilvl: int | None) -> str | None:
-    """A SimulationCraft profile for the gear they had on at that pull."""
+def profile(char: Char, info: dict, race: str, ilvl: int | None, traits: list | None) -> tuple[str, bool] | None:
+    """A SimulationCraft profile for the gear they had on at that pull, and whether the talents in
+    it are theirs. Without the trait table (or if the encode fails) they're left as a comment, and
+    simc falls back to nothing, which is worth knowing before trusting the number."""
     spec = SPECS.get(info.get("specID"))
     if not spec:
         return None
     wow_class, spec_name = spec
-    talents = info.get("talentTree") or []
+    tree = info.get("talentTree") or []
+    talents, why = None, "no trait table: pass --traits or --simc from a source build"
+    if traits:
+        try:
+            talents = simtalents.talents_line(tree, info["specID"], traits)
+        except simtalents.TalentError as err:
+            why = str(err)
     lines = [
         f'{wow_class}="{char.name}"',
         f"level={LEVEL}",
         f"race={race}",
         f"spec={spec_name}",
-        "",
-        f"# Built from a Warcraft Logs pull{f' · item level {ilvl}' if ilvl else ''}.",
-        "# Talents as WCL records them (node id:rank) — simc wants the loadout string, so this is",
-        "# a comment. Paste a `talents=` line in, or let simc use its default for the spec.",
-        "# " + " ".join(f"{t.get('nodeID')}:{t.get('rank')}" for t in talents),
-        "",
-        *gear_lines(info.get("gear")),
     ]
-    return "\n".join(lines) + "\n"
+    if talents:
+        lines.append(f"talents={talents}")
+    lines += ["", f"# Built from a Warcraft Logs pull{f' · item level {ilvl}' if ilvl else ''}."]
+    if not talents:
+        lines += [f"# No talents: {why}.",
+                  "# What the log recorded, as node id:rank —",
+                  "# " + " ".join(f"{t.get('nodeID')}:{t.get('rank')}" for t in tree)]
+    lines += ["", *gear_lines(info.get("gear"))]
+    return "\n".join(lines) + "\n", bool(talents)
 
 
 # --- the sim --------------------------------------------------------------------------------
@@ -161,7 +171,25 @@ async def fetch(url: str) -> tuple[str, dict]:
         await client.close()
 
 
-def main(url: str, min_alive: float, iterations: int, simc: str | None) -> None:
+def trait_table(traits: str | None, simc: str | None) -> list | None:
+    """The simc build's own trait table: named with --traits, or found in the source tree that
+    sits next to the binary, the way livibots finds it."""
+    path = Path(traits) if traits else None
+    if path is None and simc:
+        source = Path(simc).resolve().parent.parent
+        path = source / "engine" / "dbc" / "generated" / "trait_data.inc"
+    if path is None or not path.exists():
+        if traits:
+            print(f"no trait table at {path}", file=sys.stderr)
+        return None
+    try:
+        return simtalents.load_traits(path)
+    except (simtalents.TalentError, OSError) as err:
+        print(f"couldn't read the trait table: {err}", file=sys.stderr)
+        return None
+
+
+def main(url: str, min_alive: float, iterations: int, simc: str | None, traits_path: str | None) -> None:
     load_env()
     code, report = asyncio.run(fetch(url))
     settings = RecapSettings.from_env()
@@ -174,6 +202,9 @@ def main(url: str, min_alive: float, iterations: int, simc: str | None) -> None:
         rezzes[(event.get("fight"), event.get("targetID"))].append(event.get("timestamp"))
     snapshots = {(e.get("fight"), e.get("sourceID")): e for e in report.get("combatantInfo") or []}
     races = json.loads(RACES.read_text(encoding="utf-8")) if RACES.exists() else {}
+    traits = trait_table(traits_path, simc)
+    print(f"talents: {'from the log, encoded against ' + str(len(traits)) + ' trait rows' if traits else 'OFF — no trait table, sims will use no talents at all'}")
+    with_talents = 0
 
     out = OUT / code
     out.mkdir(parents=True, exist_ok=True)
@@ -192,10 +223,12 @@ def main(url: str, min_alive: float, iterations: int, simc: str | None) -> None:
             if share < min_alive:
                 continue
             info = snapshots.get((pull.id, actor)) or {}
-            text = profile(char, info, races.get(char.name) or DEFAULT_RACE.get(info.get("faction"), "human"),
-                           max((i.get("itemLevel") or 0) for i in info.get("gear") or [{}]) or None)
-            if not text:
+            built = profile(char, info, races.get(char.name) or DEFAULT_RACE.get(info.get("faction"), "human"),
+                            max((i.get("itemLevel") or 0) for i in info.get("gear") or [{}]) or None, traits)
+            if not built:
                 continue
+            text, talented = built
+            with_talents += talented
             path = out / f"{pull.id}-{char.name}.simc"
             path.write_text(text, encoding="utf-8")
             simmed = run_simc(simc, path, pull.seconds, iterations) if simc else None
@@ -206,6 +239,7 @@ def main(url: str, min_alive: float, iterations: int, simc: str | None) -> None:
                   f"{(simmed or 0) / 1000:>9.1f}k{ratio:>9}")
         if not simc:
             print(f"    profiles written to {out} · set SIMC_PATH or pass --simc to fill the sim column")
+    print(f"\n{with_talents} profiles carry the raider's own talents.")
 
 
 if __name__ == "__main__":
@@ -214,5 +248,7 @@ if __name__ == "__main__":
     parser.add_argument("--min-alive", type=float, default=95, help="percent of the fight alive (default 95)")
     parser.add_argument("--iterations", type=int, default=3000)
     parser.add_argument("--simc", default=os.environ.get("SIMC_PATH"))
+    parser.add_argument("--traits", default=os.environ.get("SIMC_TRAITS"),
+                        help="trait_data.inc from the simc build (found next to --simc if omitted)")
     args = parser.parse_args()
-    main(args.url, args.min_alive / 100, args.iterations, args.simc)
+    main(args.url, args.min_alive / 100, args.iterations, args.simc, args.traits)

@@ -247,6 +247,28 @@ Raw JSON lands in `tools/probe-out/` (git-ignored, since it contains character n
 `python -m tools.make_fixture <probe json> tests/fixtures/<name>.json` turns one into a test fixture
 with the names replaced.
 
+## Sim check (experimental)
+
+`tools/simcheck.py` answers "who beat their own gear". For every boss the raid killed it takes the
+DPS who were **alive for 95% of the fight** (a battle rez counts as alive again, so a fast one keeps
+you over the line and a slow one doesn't), builds a SimulationCraft profile from the gear they wore
+on that pull, and prints their real DPS — which the rankings already carry — beside the sim.
+
+```
+python -m tools.simcheck https://www.warcraftlogs.com/reports/<code> --simc /path/to/simc
+```
+
+Nothing in the bot calls it yet. Without `--simc` (or `SIMC_PATH`) it writes the profiles to
+`tools/simcheck-out/` (git-ignored: character names) and leaves the sim column empty.
+
+**Talents** come out of the log as node ids and ranks, not the loadout string simc wants, so
+`tools/simtalents.py` encodes one — the bit layout is simc's own `parse_traits_hash()` run
+backwards, against that build's `engine/dbc/generated/trait_data.inc`. The file is found next to
+the binary, or named with `--traits`. Every string is decoded again before use, and a profile whose
+talents don't survive that round trip says so in a comment rather than simming a lie. **Race** isn't
+in a log at all; it's defaulted by faction, and `tools/sim-races.json` (`{"Charname": "orc"}`)
+overrides it.
+
 ## Development
 
 ```

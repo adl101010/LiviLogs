@@ -14,7 +14,7 @@ from .sample_report import report
 
 
 def make_bot(default_realm=None):
-    config = Config("token", frozenset(), None, default_realm, ":memory:", 5, 20, 8,
+    config = Config("token", frozenset(), frozenset(), default_realm, ":memory:", 5, 20, 8,
                     ZoneInfo("UTC"), True, RecapSettings())
     return RecapBot(config)
 

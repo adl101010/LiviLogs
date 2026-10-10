@@ -219,6 +219,9 @@ every Classic site. A report costs roughly 20-45 of the 3,600 points WCL allows 
 In Discord: Settings → Advanced → **Developer Mode** on. Then right-click the logs channel → Copy
 Channel ID (`WATCH_CHANNEL_IDS`) and your server icon → Copy Server ID (`DISCORD_GUILD_ID`).
 
+`DISCORD_GUILD_ID` can be several servers, comma-separated (`123,456`). Leave it empty and LiviLogs
+sets its commands up in every server it's in.
+
 ### 4. Run it
 
 In Dockge, create a stack from [`docker-compose.yml`](docker-compose.yml) and fill in the stack's `.env`
@@ -253,6 +256,20 @@ with the names replaced.
 .venv/Scripts/python -m pytest
 ```
 
+### Sharing a bot token with other programs
+
+LiviLogs can share a Discord application (and token) with other bots or agents:
+
+- **Commands.** It never bulk-syncs, and never touches global commands. On startup and when it joins
+  a server, it creates or updates **its own** seven commands in that server one at a time, skipping any
+  that haven't changed. It deletes only names on its own list of retired commands, and that list is empty.
+  Another program's commands in the same server are left alone, whatever order the programs start in.
+- **Interactions.** Slash commands, context menus, autocomplete and buttons that aren't LiviLogs' are
+  ignored without a reply or an error in the log. Every button and menu LiviLogs creates has an id that
+  starts with `logs:`. Cards posted before that prefix existed keep working.
+
+The other programs have to follow the same rules for this to hold.
+
 | Path | What |
 |---|---|
 | `bot/wcl.py` | WCL API: login, the one big GraphQL query, link parsing |
@@ -265,5 +282,7 @@ with the names replaced.
 | `bot/watch.py` | "Is this log finished?" |
 | `bot/store.py` | SQLite: links, seen characters, report status, history |
 | `bot/main.py` | Discord: channel watcher, slash commands, cards (components v2), threads, pings |
+| `bot/commands_sync.py` | Registers slash commands one at a time per server, never touching the global scope or other programs' commands |
+| `bot/ids.py` | The `logs:` prefix on every button and menu id, so other programs' components can be ignored |
 
 Pushing `dev` builds `ghcr.io/adl101010/livilogs:dev`; pushing `master` builds `:stable` and `:latest`.

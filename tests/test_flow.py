@@ -100,7 +100,7 @@ class FakeWCL:
 
 
 def make_bot(wcl, channel=None):
-    config = Config("token", frozenset({CHANNEL}), None, None, ":memory:", 5, 20, 8,
+    config = Config("token", frozenset({CHANNEL}), frozenset(), None, ":memory:", 5, 20, 8,
                     ZoneInfo("UTC"), True, RecapSettings())
     bot = RecapBot(config)
     bot.wcl = wcl

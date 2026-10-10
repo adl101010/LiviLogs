@@ -114,7 +114,7 @@ class RecapSettings:
 class Config:
     discord_token: str
     watch_channel_ids: frozenset[int]
-    guild_id: int | None
+    guild_ids: frozenset[int]  # DISCORD_GUILD_ID: one or more, comma-separated; empty = every server
     default_realm: str | None
     db_path: str
     poll_minutes: int
@@ -131,7 +131,7 @@ class Config:
         return cls(
             discord_token=_required("DISCORD_TOKEN"),
             watch_channel_ids=_ids("WATCH_CHANNEL_IDS"),
-            guild_id=_int("DISCORD_GUILD_ID"),
+            guild_ids=_ids("DISCORD_GUILD_ID"),
             default_realm=_str("DEFAULT_REALM"),
             db_path=_str("DB_PATH", "/data/livilogs.sqlite3"),
             poll_minutes=_int("POLL_MINUTES", 5),

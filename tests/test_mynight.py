@@ -122,7 +122,8 @@ def test_my_night_true_puts_the_button_on_the_headline():
     bot, channel = make_bot(FakeWCL())
     bot.config = replace(bot.config, my_night=True)
     post_link(bot, channel)
-    assert bot_buttons(channel.sent[0]) == [BUTTON]
+    # New cards carry the "logs:" prefix; BUTTON (bare) is what cards posted before it carry.
+    assert bot_buttons(channel.sent[0]) == [f"logs:{BUTTON}"]
 
 
 def test_thread_cards_upload_their_charts():
@@ -173,7 +174,7 @@ def test_someone_not_linked_picks_their_character():
     sent, _ = press(bot, BUTTON, 999)
     assert "Which one is you?" in sent[0].content and sent[0].ephemeral
     menu = next(i for i in sent[0].view.children if isinstance(i, discord.ui.Select))
-    assert menu.custom_id.startswith(f"{MY_NIGHT_PICK}:www.warcraftlogs.com:AbCdEf1234567890")
+    assert menu.custom_id.startswith(f"logs:{MY_NIGHT_PICK}:www.warcraftlogs.com:AbCdEf1234567890")
     assert [o.label for o in menu.options] == ["Dyer", "Greyson", "Healz", "Middling", "Pumper", "Tanky"]
 
     sent, _ = press(bot, menu.custom_id, 999, values=["Pumper-Area 52"])

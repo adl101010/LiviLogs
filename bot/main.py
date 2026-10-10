@@ -12,8 +12,9 @@ import httpx
 from discord import app_commands, ui
 
 from .awards import Line, build_lines
-from . import linking
+from . import ids, linking
 from .charts import draw_charts
+from .commands_sync import STALE_COMMAND_NAMES, local_payloads, reconcile_guild_commands
 from .config import Config
 from .mynight import my_night_card
 from .recap import Char, Night, analyze, norm_realm
@@ -34,6 +35,8 @@ BOSS_ICON = "https://assets.rpglogs.com/img/warcraft/bosses/{}-icon.jpg"
 MY_NIGHT = "mynight"
 MY_NIGHT_PICK = "mynight-pick"
 NIGHTS_KEPT = 8  # recent nights kept in memory for the button; older ones are fetched again
+# Ids from cards and menus posted before ids got the "logs:" prefix still work.
+LEGACY_KINDS = frozenset({MY_NIGHT, MY_NIGHT_PICK, *linking.KINDS})
 
 
 def pings_for(user_ids) -> discord.AllowedMentions:
@@ -111,7 +114,7 @@ def character_picker(night: Night, ref: ReportRef) -> ui.View:
         chunk = roster[i:i + 25]
         options = [discord.SelectOption(label=c.name, value=c.label, description=c.realm or None) for c in chunk]
         placeholder = "Pick your character" if len(roster) <= 25 else f"{chunk[0].name} – {chunk[-1].name}"
-        view.add_item(ui.Select(custom_id=f"{MY_NIGHT_PICK}:{ref.host}:{ref.code}:{i // 25}",
+        view.add_item(ui.Select(custom_id=ids.tag(f"{MY_NIGHT_PICK}:{ref.host}:{ref.code}:{i // 25}"),
                                 placeholder=placeholder, options=options))
     return view
 
@@ -128,6 +131,19 @@ class Built:
     lines: list[Line]
 
 
+class QuietTree(app_commands.CommandTree):
+    """A command tree that stays silent about commands that aren't ours.
+
+    The bot token can be shared with other programs, and Discord sends us every interaction on the
+    application, including their slash commands and context menus. We have nothing to say about those.
+    """
+
+    async def on_error(self, interaction: discord.Interaction, error: app_commands.AppCommandError) -> None:
+        if isinstance(error, app_commands.CommandNotFound):
+            return
+        await super().on_error(interaction, error)
+
+
 class RecapBot(discord.Client):
     def __init__(self, config: Config):
         intents = discord.Intents.default()
@@ -136,7 +152,7 @@ class RecapBot(discord.Client):
         self.config = config
         self.store = Store(config.db_path)
         self.wcl = WCLClient()
-        self.tree = app_commands.CommandTree(self)
+        self.tree = QuietTree(self)
         for command in (link_command, link_raid_command, link_member_menu, unlink_command, links_command,
                         recap_command, settings_command):
             self.tree.add_command(command)
@@ -145,20 +161,43 @@ class RecapBot(discord.Client):
         self._icons: dict[int, bool] = {}  # boss id -> WCL has a picture for it
         self._nights: OrderedDict[ReportRef, tuple[Night, list[Line]]] = OrderedDict()  # for My night
         self._night_locks: dict[ReportRef, asyncio.Lock] = {}
+        self._synced_guilds: set[int] = set()  # servers whose commands were registered this run
 
     async def setup_hook(self) -> None:
-        if self.config.guild_id:
-            guild = discord.Object(id=self.config.guild_id)
-            self.tree.copy_global_to(guild=guild)
-            await self.tree.sync(guild=guild)  # shows up instantly in that server
-        else:
-            await self.tree.sync()  # global: can take up to an hour to appear
+        # Commands are registered per server once we know which servers we're in (on_ready and
+        # on_guild_join), one command at a time. Never tree.sync(): it replaces every command in a
+        # scope, which would wipe the commands of any other program sharing this bot token.
         self._poller = asyncio.create_task(self._poll_forever())
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s", self.user)
         if not self.config.watch_channel_ids:
             log.warning("WATCH_CHANNEL_IDS is empty: only /recap will work, nothing is auto-posted")
+        wanted = self.config.guild_ids
+        for guild_id in sorted(wanted):
+            if self.get_guild(guild_id) is None:
+                log.warning("DISCORD_GUILD_ID %s isn't a server this bot is in; skipping it", guild_id)
+        for guild in self.guilds:
+            if not wanted or guild.id in wanted:
+                await self.register_commands(guild.id)
+
+    async def on_guild_join(self, guild: discord.Guild) -> None:
+        if not self.config.guild_ids or guild.id in self.config.guild_ids:
+            await self.register_commands(guild.id)
+
+    async def register_commands(self, guild_id: int) -> None:
+        """Create or update our commands in one server, leaving anyone else's alone."""
+        if guild_id in self._synced_guilds or self.application_id is None:
+            return
+        try:
+            result = await reconcile_guild_commands(
+                self.http, self.application_id, guild_id, local_payloads(self.tree), STALE_COMMAND_NAMES)
+        except discord.HTTPException as e:
+            log.warning("Couldn't register commands in server %s: %s", guild_id, e)
+            return
+        self._synced_guilds.add(guild_id)
+        log.info("Commands in server %s: %d created, %d updated, %d unchanged, %d removed", guild_id,
+                 len(result.created), len(result.updated), len(result.unchanged), len(result.deleted))
 
     async def close(self) -> None:
         await self.wcl.close()
@@ -281,7 +320,7 @@ class RecapBot(discord.Client):
         if self.config.charts:
             keys = {line.chart for line in lines if line.chart}
             charts = await asyncio.to_thread(draw_charts, night, keys, self.config.recap)
-        actions = [("👤 My night", f"{MY_NIGHT}:{ref.host}:{ref.code}")] if self.config.my_night else []
+        actions = [("👤 My night", ids.tag(f"{MY_NIGHT}:{ref.host}:{ref.code}"))] if self.config.my_night else []
         # /settings mentions: with mentions off (the default) everyone shows as their character name
         # and nobody is pinged; links still drive My night.
         mentions = self.store.mentions
@@ -412,7 +451,11 @@ class RecapBot(discord.Client):
         if interaction.type != discord.InteractionType.component:
             return  # slash commands are the command tree's
         data = interaction.data or {}
-        kind, _, rest = str(data.get("custom_id", "")).partition(":")
+        # The bot token can be shared: ids that aren't ours belong to another program.
+        own = ids.untag(str(data.get("custom_id", "")), LEGACY_KINDS)
+        if own is None:
+            return
+        kind, _, rest = own.partition(":")
         if kind in linking.KINDS:
             try:
                 await linking.handle(self, interaction, kind, rest)

@@ -3,16 +3,17 @@
 answer privately.
 
 Nothing is kept between clicks: each menu's id says which report, page and character it is for,
-so the pages keep working after a restart.
+so the pages keep working after a restart. Every id starts with "logs:" (see ids.py):
 
-    lr-pick:<page>:<u|a>:<site>:<code>:<Name-Realm>   pick a member for one raider (u = unlinked only)
-    lr-page:<page>:<u|a>:<site>:<code>                 change page
-    ml-add:<member id> / ml-del:<member id>            add / remove characters on the right-click menu
+    logs:lr-pick:<page>:<u|a>:<site>:<code>:<Name-Realm>   pick a member for one raider (u = unlinked only)
+    logs:lr-page:<page>:<u|a>:<site>:<code>                 change page
+    logs:ml-add:<member id> / logs:ml-del:<member id>       add / remove characters on the right-click menu
 """
 
 import discord
 from discord import ui
 
+from . import ids
 from .recap import Char
 from .wcl import ReportRef, find_report_links
 
@@ -66,7 +67,7 @@ def roster_view(chars: list[Char], user_for, ref: ReportRef, page: int, everyone
     for char in shown[page * PER_PAGE:(page + 1) * PER_PAGE]:
         owner = user_for(char)
         line = f"**{char.name}** · {char.realm}" + (f" → <@{owner}>" if owner else "")
-        custom_id = f"{PICK}:{page}:{mode}:{report_id(ref)}:{char.label}"
+        custom_id = ids.tag(f"{PICK}:{page}:{mode}:{report_id(ref)}:{char.label}")
         if len(custom_id) > ID_LIMIT:
             items.append(ui.TextDisplay(line + "\n-# Name too long for a menu: use /link for this one"))
             continue
@@ -74,7 +75,7 @@ def roster_view(chars: list[Char], user_for, ref: ReportRef, page: int, everyone
                                default_values=[discord.Object(owner)] if owner else [])
         items += [ui.TextDisplay(line), ui.ActionRow(picker)]
     if pages > 1:
-        base = f"{PAGE}:{{}}:{mode}:{report_id(ref)}"
+        base = ids.tag(f"{PAGE}:{{}}:{mode}:{report_id(ref)}")
         items.append(ui.ActionRow(
             ui.Button(label="◀ Previous", custom_id=base.format(page - 1), disabled=page == 0),
             ui.Button(label="Next ▶", custom_id=base.format(page + 1), disabled=page >= pages - 1),
@@ -105,12 +106,12 @@ def member_view(member_id: int, store, note: str | None = None) -> ui.LayoutView
                                         description=(c.realm + (" · linked to someone else" if store.user_for(c)
                                                                 else ""))[:100])
                    for c in candidates[:25]]
-        items.append(ui.ActionRow(ui.Select(custom_id=f"{ADD}:{member_id}", placeholder="Add characters…",
+        items.append(ui.ActionRow(ui.Select(custom_id=ids.tag(f"{ADD}:{member_id}"), placeholder="Add characters…",
                                             min_values=1, max_values=len(options), options=options)))
     if mine:
         options = [discord.SelectOption(label=c.name[:100], value=c.label[:100], description=c.realm[:100] or None)
                    for c in mine[:25]]
-        items.append(ui.ActionRow(ui.Select(custom_id=f"{REMOVE}:{member_id}", placeholder="Remove characters…",
+        items.append(ui.ActionRow(ui.Select(custom_id=ids.tag(f"{REMOVE}:{member_id}"), placeholder="Remove characters…",
                                             min_values=1, max_values=len(options), options=options)))
     items.append(ui.TextDisplay("-# The list is everyone from the last 3 raids. Someone not in it? "
                                 "Use /link with their character's name."))

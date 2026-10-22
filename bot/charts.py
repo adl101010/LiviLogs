@@ -252,7 +252,8 @@ def _consumable_cells(row: ConsumableRow, show_vantus: bool, show_rune: bool,
         else:
             cells.append(("–", "dim"))
     if show_rune:
-        cells.append((f"{row.rune}/{row.snapshots}" if row.rune else "–", "star" if "tryhard" in row.flags else "dim"))
+        # 0/18, not a dash: a dash means "didn't apply", and the rune applied to everyone.
+        cells.append((f"{row.rune}/{row.snapshots}", "star" if "tryhard" in row.flags else "dim"))
     return cells
 
 
@@ -277,8 +278,10 @@ def consumables_chart(night: Night, settings: RecapSettings) -> bytes | None:
     for _, w in columns:
         starts.append(x)
         x += w + 3
-    notes = ["Pulls potted: pulls with at least one potion, out of pulls they were in (healers: mana potions count).",
-             "Potions used: every potion drunk all night. Two on one pull counts as two."]
+    notes = ["Pulls potted: pulls with at least one combat potion, out of pulls they were in (healers: mana potions count).",
+             "Potions used: combat potions drunk all night, plus mana potions for healers. Two on one pull counts as two.",
+             "Healthstone / potion: healthstones and health potions used. Vantus: out of the pulls most of the raid had one.",
+             "– means it didn't apply: no vantus pull, or a class imbue on the weapon where oil would go."]
 
     name_w = max(text_width(r.char.name, 13) for r in rows) + 14
     cell_h, gap = 24, 3
@@ -289,7 +292,7 @@ def consumables_chart(night: Night, settings: RecapSettings) -> bytes | None:
     height = top + header_h + len(groups) * 22 + len(rows) * (cell_h + gap) + 44 + 17 * len(notes)
 
     canvas = Canvas(width, height)
-    _header(canvas, "Consumables", "flask, food, oil, vantus and rune: pulls they had it on, out of pulls they were in")
+    _header(canvas, "Consumables", "flask, food, oil and rune: pulls they had it on, out of pulls they were in")
     x0 = left + name_w
     for (name, cell_w), start in zip(columns, starts):
         wrapped = wrap(name, cell_w, 10)

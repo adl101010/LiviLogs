@@ -211,7 +211,7 @@ def test_awards():
     assert "**🪄 Necromancer** - **Healz** · 3 battle rezzes" in text
     assert "**🚽 Parse of shame** - **Greyson** · 10 on Boss A" in text
     assert "**🧽 Damage sponge** - **Dyer** · 100M damage taken" in text
-    assert "**🛡️ Outdamaged by a tank** - **Greyson** did less damage than **Tanky**" in text
+    assert "**🛡️ Outdamaged by a tank** - **Greyson** did less damage per second than **Tanky**" in text
     assert "**🎯 Nemesis** - **Dyer** died to Fire 3 times" in text
     assert "**🧲 Brez magnet** - **Dyer** · rezzed 3 times" in text
     assert "**👻 Ghost** - **Greyson** · spent 4m 19s dead" in text

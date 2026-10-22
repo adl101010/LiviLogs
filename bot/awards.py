@@ -429,7 +429,8 @@ class Builder:
             deaths = night.deaths.get(pull.id)
             if not pull.kill and deaths:
                 wipes_with_deaths += 1
-                last[deaths[-1].char] += 1
+                # Everyone who died in the wipe's final instant was last to die.
+                last.update({d.char for d in deaths if d.time == deaths[-1].time})
         self.power_infusion()
 
         chars, n = leaders(last, 3, max_names=1)
@@ -537,7 +538,9 @@ class Builder:
                              if role == DPS and c in damage_rates and damage_rates[c] < best_tank),
                             key=lambda c: damage_rates[c])
             if beaten:
-                self.add(LOWLIGHTS, [*joined(beaten), " did less damage than ", tank], "outdamaged", beaten,
+                # Per second, over the pulls each of them was in: a tank who sat some out isn't a
+                # lower bar, and neither is a DPS who did.
+                self.add(LOWLIGHTS, [*joined(beaten), " did less damage per second than ", tank], "outdamaged", beaten,
                          title="🛡️ Outdamaged by a tank")
 
         # Idle: DPS and tanks well under the raid's own usual active time. Compared with the raid

@@ -162,6 +162,16 @@ class Builder:
         self.settings = settings
         self.lines: list[Line] = []
 
+    @property
+    def counted_note(self) -> str:
+        """What a death count means wherever the report prints one."""
+        return f"Every death on a kill, and the first {self.settings.wipe_cutoff} of each wipe"
+
+    def in_all(self, char: Char, counted: int) -> str:
+        """" (23 in all)" when someone died more times than the count that's being shown."""
+        every = sum(1 for ds in self.night.deaths.values() for d in ds if d.char == char)
+        return f" ({every} in all)" if every != counted else ""
+
     def tag(self, difficulty: int | None) -> str:
         """" (Mythic)" on a night that raided more than one difficulty, nothing on a normal night."""
         name = difficulty_name(difficulty)
@@ -208,9 +218,15 @@ class Builder:
                      title="🗑️ Grey", cluster="calls", stacked=False)
         top = [d for d in night.floor if d.deaths == night.floor[0].deaths] if night.floor else []
         if top and top[0].deaths >= 2:
-            each = " each" if len(top) > 1 else ""
-            self.add(HEADLINE, [*joined([d.char for d in top]), f" {top[0].deaths} deaths{each}"],
-                     "floor", [d.char for d in top], title="💀 Floor inspector", cluster="calls", stacked=False)
+            # The floor counts deaths that mattered; when someone died more in all, say so rather
+            # than print the smaller number as if it were everything.
+            parts: list[Part] = []
+            for i, d in enumerate(top):
+                if i:
+                    parts.append(" · ")
+                parts += [d.char, f" {d.deaths} deaths{self.in_all(d.char, d.deaths)}"]
+            self.add(HEADLINE, parts, "floor", [d.char for d in top], title="💀 Floor inspector",
+                     cluster="calls", stacked=False)
 
     def progress_lines(self, unkilled: list[Boss]) -> None:
         prog_night = not self.night.kills
@@ -296,17 +312,34 @@ class Builder:
             self.add(NIGHT, [f"{wall.name} · {len(wall.wipes)} wipes"], title="🧱 Wall of the night",
                      cluster="facts", stacked=True)
 
+        # Ties at the top name both (two at most): picking one would be WCL's event order talking.
         killers = Counter(d.ability for ds in night.counted.values() for d in ds if d.ability)
         if killers:
-            name, n = killers.most_common(1)[0]
-            if n >= 5:
-                self.add(NIGHT, [f"{ability_name(name)} · {n} deaths"], title="☠️ Raid's nemesis",
+            n = max(killers.values())
+            names = sorted(a for a, v in killers.items() if v == n)
+            if n >= 5 and len(names) <= 2:
+                if len(names) == 1:
+                    every = sum(1 for ds in night.deaths.values() for d in ds if d.ability == names[0])
+                    body = f"{ability_name(names[0])} · {n} deaths" + (f" ({every} in all)" if every != n else "")
+                else:
+                    body = f"{ability_name(names[0])} and {ability_name(names[1])} · {n} deaths each"
+                self.add(NIGHT, [body], title="☠️ Raid's nemesis", note=self.counted_note,
                          cluster="facts", stacked=True)
-        starters = Counter(ds[0].ability for ds in night.counted.values() if ds and ds[0].ability)
+
+        # Only wipes: a first death on a kill didn't start anything. Everyone who died in the same
+        # instant as the first death shares it.
+        wipes = {p.id for p in night.pulls if not p.kill}
+        starters: Counter = Counter()
+        for pid, ds in night.counted.items():
+            if pid in wipes and ds:
+                starters.update({d.ability for d in ds if d.time == ds[0].time and d.ability})
         if starters:
-            name, n = starters.most_common(1)[0]
-            if n >= 3:
-                self.add(NIGHT, [f"{ability_name(name)} caused the first death on {n} pulls"],
+            n = max(starters.values())
+            names = sorted(a for a, v in starters.items() if v == n)
+            if n >= 3 and len(names) <= 2:
+                who = " and ".join(ability_name(a) for a in names)
+                each = " each" if len(names) > 1 else ""
+                self.add(NIGHT, [f"{who}{each} caused the first death on {n} wipes"],
                          title="🧨 Wipe starter", cluster="facts", stacked=True)
 
     # --- leaderboard ---------------------------------------------------------------------------
@@ -516,7 +549,8 @@ class Builder:
                         parts.append(" · ")
                     parts += [c, f" {night.active[c] * 100:.0f}%"]
                 self.add(LOWLIGHTS, parts, "idle", idle, title="💤 Idle",
-                         note=f"Time alive in pulls spent dealing damage; the raid's usual is {usual * 100:.0f}%",
+                         note=f"WCL active time over time in boss pulls, for DPS and tanks alive for 95% of them. "
+                              f"The raid's usual is {usual * 100:.0f}%",
                          stacked=True)
 
     # --- deaths --------------------------------------------------------------------------------
@@ -531,10 +565,11 @@ class Builder:
                 parts += [d.char, f" {d.deaths}"]
             if night.floor_tied_more:
                 parts.append(f" · +{night.floor_tied_more} more tied at {night.floor[-1].deaths}")
-            self.add(DEATHS, parts, title="💀 Floor inspector", note="Deaths before the wipe was called",
+            self.add(DEATHS, parts, title="💀 Floor inspector", note=self.counted_note,
                      stacked=True)
 
-        firsts = Counter(ds[0].char for ds in night.counted.values() if ds)
+        # Everyone who went down in the same instant as the first death was first to die.
+        firsts = Counter(d.char for ds in night.counted.values() if ds for d in ds if d.time == ds[0].time)
         chars, n = leaders(firsts, 3)
         if chars:
             each = " each" if len(chars) > 1 else ""
@@ -769,8 +804,9 @@ class Builder:
                      note="No combat potion on most of their pulls (healers: no potion of any kind)",
                      cluster="shame", chart="consumables")
 
-        # Died with a healthstone in the bag: not one healthstone or health potion all night, and
-        # died at least twice (deaths before the wipe call, the same count as the floor inspector).
+        # Died with a healthstone in the bag: not one healthstone or health potion all night, and at
+        # least two deaths that counted (as the floor inspector counts them). The line says how many
+        # times they actually died.
         if night.casts_known:
             counted = Counter(d.char for ds in night.counted.values() for d in ds)
             bag = sorted((c for c, n in counted.items() if n >= 2 and not night.health_items.get(c)),
@@ -780,7 +816,8 @@ class Builder:
                 for i, c in enumerate(bag):
                     if i:
                         parts.append(" · ")
-                    parts += [c, (" died " if i == 0 else " ") + times(counted[c])]
+                    every = sum(1 for ds in night.deaths.values() for d in ds if d.char == c)
+                    parts += [c, (" died " if i == 0 else " ") + times(every)]
                 self.add(CONSUMABLES, parts, "healthstone_bag", bag, title="🪦 Died with a healthstone in the bag",
                          note="Not one healthstone or health potion all night", cluster="shame", chart="consumables")
 
@@ -882,7 +919,7 @@ class ConsumableRow:
     combat_potions: int = 0  # every combat potion drunk
     potted: int = 0  # "pulls potted": pulls with at least one potion (for healers, a mana potion counts)
     oil: int = 0  # pulls with a weapon oil (or stone, or shaman imbue) on the main hand
-    oil_pulls: int = 0  # pulls with a main-hand weapon in the log's gear snapshot
+    oil_pulls: int = 0  # pulls with a main-hand weapon that could take oil (no class imbue on it)
     oil_gone_pull: int | None = None  # first pull without weapon oil after having it: it ran out between pulls
 
 
@@ -919,7 +956,7 @@ def consumable_rows(night: Night, settings: RecapSettings) -> list[ConsumableRow
         for char, gear in players.items():
             row = rows.get(char)
             weapon = gear[15] if row and len(gear) > 15 else None  # 15 = main hand
-            if weapon:
+            if weapon and not weapon.imbued:  # a class imbue in the slot: oil isn't possible
                 row.oil_pulls += 1
                 row.oil += weapon.oiled
     for char, row in rows.items():
@@ -927,7 +964,7 @@ def consumable_rows(night: Night, settings: RecapSettings) -> list[ConsumableRow
         for pull in night.pulls:
             gear = night.gear_at_pull.get(pull.id, {}).get(char)
             weapon = gear[15] if gear and len(gear) > 15 else None
-            if not weapon:
+            if not weapon or weapon.imbued:
                 continue
             if weapon.oiled:
                 had = True

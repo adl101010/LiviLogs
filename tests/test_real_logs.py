@@ -34,7 +34,9 @@ def test_guild_kill_night():
     assert (night.difficulty, night.kills, night.wipes) == (4, 7, 11)
     assert [p.average for p in night.high] == [95.6]  # refetched 2026-09-24; WCL re-ranks, so parses drift
     assert [(p.average, p.role) for p in night.grey] == [(20.1, "healers")]
-    assert [(d.deaths, d.first_deaths) for d in night.floor] == [(11, 5), (9, 1), (7, 1), (7, 0)]
+    # Every death on a kill counts now (a 6th death on a kill used to drop out), and the first 5
+    # of each wipe plus anyone who died in the same instant as the 5th.
+    assert [(d.deaths, d.first_deaths) for d in night.floor] == [(12, 5), (9, 1), (8, 1)]
 
     r, text, _ = text_of(night)
     assert r.headline.subtitle.endswith("7 bosses down · 18 pulls · 2h 27m")
@@ -57,7 +59,8 @@ def test_guild_kill_night():
     # One raider used no healthstone all night. The count comes from cast events: the casts table
     # only ever lists an ability's top five users, so everyone else used to read as zero.
     assert "**🪦 Died with a healthstone in the bag**" in consumables
-    assert consumables.count("died 7 times") == 1 and "died 7 times · " not in consumables
+    # The line gives how often they really died: 15 in all, 8 of which count for the floor.
+    assert "**P-04d994** died 15 times\n" in consumables and consumables.count("**🪦") == 1
     assert "**⚗️ No flask**" in consumables and " 4 of 17 pulls" in consumables
     assert ", all 4 pulls" in consumables  # six people skipped vantus on the 4 pulls the raid used it
 
@@ -85,7 +88,8 @@ def test_guild_prog_night():
     assert "28 combat potions in 18 pulls" in consumables
     assert "38 healthstones and health potions" in consumables
     assert " 14 of 15 pulls · " in consumables and consumables.count("no potion of any kind all night") == 2
-    assert "died 4 times" in consumables and consumables.count("**🪦") == 1
+    # Died 7 times in all (4 of them counted for the floor): the line says how often they died.
+    assert "**P-04d994** died 7 times" in consumables and consumables.count("**🪦") == 1
     assert " 5 of 15 pulls" in consumables  # forgot to eat
     assert " all 15 pulls · " in consumables and " all 6 pulls" in consumables  # no vantus
 

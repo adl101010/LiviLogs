@@ -26,7 +26,7 @@ def my_night_card(night: Night, lines: list[Line], char: Char, settings: RecapSe
         facts.append(f"<t:{night.start_ms // 1000}:D>")
     facts.append(f"all {total} pulls" if played == total else f"{played} of {total} pulls")
 
-    blocks = [b for b in (_performance(night, char, role), _deaths(night, char),
+    blocks = [b for b in (_performance(night, char, role), _deaths(night, char, settings),
                           _consumables(night, char, settings), _gear(night, char, settings),
                           _extras(night, char), _awards(lines, char)) if b]
     return Card(f"👤 Your night · {char.name}", BLURPLE, blocks, subtitle=" · ".join(facts),
@@ -66,14 +66,14 @@ def _performance(night: Night, char: Char, role: str) -> str | None:
            f"-# Wipes don't get parses, so this is raw throughput"
 
 
-def _deaths(night: Night, char: Char) -> str:
+def _deaths(night: Night, char: Char, settings: RecapSettings) -> str:
     counted = sum(1 for ds in night.counted.values() for d in ds if d.char == char)
     every = [d for ds in night.deaths.values() for d in ds if d.char == char]
     if not every:
         return "**💀 No deaths** · not one, all night"
-    text = f"**💀 {plural(counted, 'death')}** before the wipe was called"
+    text = f"**💀 {plural(counted, 'death')}**"
     if len(every) != counted:
-        text += f" ({len(every)} in all)"
+        text += f" that counted ({len(every)} in all)"
     dead = night.dead_seconds.get(char, 0)
     if dead >= 60:
         text += f" · {fmt_seconds(dead)} dead"
@@ -85,9 +85,11 @@ def _deaths(night: Night, char: Char) -> str:
             notes.append(f"{repeat[0][0]} and {repeat[1][0]} got you {times(repeat[0][1])} each")
         else:
             notes.append(f"{repeat[0][0]} got you {times(repeat[0][1])}")
-    firsts = sum(1 for ds in night.counted.values() if ds and ds[0].char == char)
+    firsts = sum(1 for ds in night.counted.values() if ds and any(d.char == char for d in ds if d.time == ds[0].time))
     if firsts:
         notes.append(f"first to die {times(firsts)}")
+    if len(every) != counted:
+        notes.append(f"counted: every death on a kill, the first {settings.wipe_cutoff} of each wipe")
     if notes:
         text += "\n-# " + " · ".join(notes)
     return text
@@ -169,7 +171,7 @@ def _extras(night: Night, char: Char) -> str | None:
     parts = []
     if char in night.active:
         usual = statistics.median(night.active.values())
-        parts.append(f"⏱️ active {night.active[char] * 100:.0f}% of your time alive (raid: {usual * 100:.0f}%)")
+        parts.append(f"⏱️ active {night.active[char] * 100:.0f}% of your time in boss pulls (raid: {usual * 100:.0f}%)")
     if night.damage_done.get(char):
         parts.append(f"⚔️ {fmt_big(night.damage_done[char])} damage")
     if night.damage_taken.get(char):

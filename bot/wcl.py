@@ -274,8 +274,12 @@ class WCLClient:
             data={"grant_type": "client_credentials"},
             auth=(client_id, secret),
         )
-        if resp.status_code != 200:
+        if resp.status_code in (400, 401, 403):
             raise WCLError(f"WCL login failed on {host} (HTTP {resp.status_code}). Check the client ID/secret.")
+        if resp.status_code != 200:
+            # 5xx and the like: Warcraft Logs itself is down or overloaded, the credentials are fine.
+            raise WCLError(f"Warcraft Logs is unavailable right now (HTTP {resp.status_code} from {host}). "
+                           f"Try again later.")
         body = resp.json()
         self._tokens[host] = (body["access_token"], time.time() + float(body.get("expires_in", 3600)))
         return body["access_token"]

@@ -42,7 +42,13 @@ def test_no_weapon_oil_callout_and_grid_column_agree():
     cells = {r.char: _consumable_cells(r, True, True, show_oil=True) for r in rows}
     bare = winners["no_oil"][0]
     assert cells[bare][2] == ("13/18", "warn")  # flask, food, then weapon oil
-    assert all(cells[r.char][2][1] == "ok" for r in rows if r.char != bare)
+    # Everyone else oiled every pull, except the specs whose class imbue fills the slot
+    # (resto shaman, protection paladin): oil can't go on, so their column says so rather than
+    # crediting the imbue as oil.
+    imbued = {r.char for r in rows if r.oil_pulls == 0}
+    assert {night.specs[c] for c in imbued} == {264, 66}
+    assert all(cells[c][2] == ("–", "dim") for c in imbued)
+    assert all(cells[r.char][2][1] == "ok" for r in rows if r.char != bare and r.char not in imbued)
     assert draw_charts(night, {"consumables"}, SETTINGS)["consumables"].startswith(b"\x89PNG")
 
 
@@ -62,8 +68,10 @@ def test_idle_time_leaves_healers_out():
 
 def test_idle_callout_on_a_kill_night():
     text = thread_text(load("gear_night"))
-    assert "**💤 Idle**\n-# Time alive in pulls spent dealing damage; the raid's usual is 95%\n" in text
-    assert " 83% · " in text and " 84%" in text
+    # WCL's active time over time in boss pulls, judged only for those alive 95% of it: here one
+    # raider, 983 s active in 1,189 s of pulls (alive 98.8% of them).
+    assert ("**💤 Idle**\n-# WCL active time over time in boss pulls, for DPS and tanks alive for 95% "
+            "of them. The raid's usual is 93%\n**P-31a3b4** 83%\n") in text
 
 
 def test_prog_night_movement_doesnt_make_everyone_idle():
@@ -76,6 +84,6 @@ def test_my_night_shows_active_time_and_oil():
     lines = build_lines(night, SETTINGS)
     idle = winners_by_key(lines)["idle"][0]
     text = card_text(my_night_card(night, lines, idle, SETTINGS, "u"))
-    assert "⏱️ active 83% of your time alive (raid: 95%)" in text
+    assert "⏱️ active 83% of your time in boss pulls (raid: 93%)" in text
     bare = winners_by_key(lines)["no_oil"][0]
     assert "⚠️ Weapon oil 13/18" in card_text(my_night_card(night, lines, bare, SETTINGS, "u"))

@@ -35,7 +35,7 @@ def test_card_shows_parses_deaths_consumables_and_awards():
     assert "all 5 pulls" in text
     assert "**📊 20.0 average** damage parse" in text
     assert "⬜ - Boss A 10" in text and "🟩 - Boss B 30" in text
-    assert "**💀 2 deaths** before the wipe was called" in text
+    assert "**💀 2 deaths**" in text and "that counted" not in text  # both counted: no qualifier
     assert "first to die once" in text
     assert "⚠️ Flask 3/5" in text and "⚠️ Vantus 0/2" in text
     assert "⚠️ **Potions** · 1/5 pulls potted · 1 used\n🟢⚫⚫⚫⚫\n" in text

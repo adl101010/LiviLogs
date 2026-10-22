@@ -19,6 +19,12 @@ DPS = "dps"
 # (combat potions, the tryhard augment rune) are listed in settings instead.
 HEALTH_ITEM_PATTERNS = ("Healthstone", "Health Potion", "Healing Potion")
 CREATE_HEALTHSTONE = "Create Healthstone"  # a warlock making them, not anyone using one
+# Temporary weapon enchants that are a class's own imbue rather than an oil or stone. They sit in
+# the same slot, so a weapon carrying one can't also be oiled: those pulls don't count for or
+# against anyone's weapon oil. Seen only on these specs in real logs:
+#   5400 Flametongue Weapon and 5401 Windfury Weapon (shaman), 6498 Earthliving Weapon (resto
+#   shaman), 7528 on a resto shaman's shield, 7143/7144 the Lightsmith paladin rites.
+CLASS_IMBUES = frozenset({5400, 5401, 6498, 7528, 7143, 7144})
 MANA_POTION_PATTERN = "Mana Potion"
 FLASK_PREFIXES = ("Flask of", "Phial of")
 FOOD_PATTERN = "Well Fed"
@@ -151,7 +157,7 @@ class Night:
     parses: list[ParseLine]
     rates: list[Rate]
     deaths: dict[int, list[Death]]  # every death, per pull, in order
-    counted: dict[int, list[Death]]  # the first WIPE_CUTOFF deaths of each pull
+    counted: dict[int, list[Death]]  # deaths that count: all of them on a kill, the first WIPE_CUTOFF of a wipe
     floor: list[DeathLine]
     floor_tied_more: int
     interrupts: Counter
@@ -418,13 +424,20 @@ def _by_player(report: dict, key: str, players: dict[int, Char]) -> dict[Char, f
     return totals
 
 
+ACTIVE_MIN_ALIVE = 0.95  # judged on active time only if alive for this much of their boss pulls
+
+
 def _active_share(report: dict, players: dict[int, Char], roles: dict[Char, str],
                   pulls_in: dict[Char, set[int]], pulls: list, dead: Counter) -> dict[Char, float]:
-    """How much of their time alive in boss pulls each DPS and tank was actually dealing damage:
-    WCL's active time over time in pulls minus time dead. 0.9 = active 90% of the time.
+    """WCL's Active %: active time over time in boss pulls, the number its own site shows. 0.9 =
+    dealing damage 90% of the time.
 
-    Healers are left out: WCL counts heals over time and shields ticking as healing activity, so
-    every healer comes out near 100% however much they cast. Anyone alive under a minute is too."""
+    Only DPS and tanks who were alive for at least 95% of their pulls are given one. WCL keeps
+    counting active time after a death (pets attack on, damage over time ticks on), so for anyone
+    who spent long dead there's no honest way to say how active they were while alive; and a
+    number that dying drags down would make this a second death count. Healers are left out
+    because heals over time and shields ticking count as activity, so every healer reads ~100%.
+    Anyone in under a minute of pulls is too."""
     busy: dict[Char, float] = {}
     for e in _table_entries(report, "damageDone"):
         char = players.get(e.get("id"))
@@ -433,9 +446,11 @@ def _active_share(report: dict, players: dict[int, Char], roles: dict[Char, str]
     length = {p.id: (p.end - p.start) for p in pulls}
     share = {}
     for char, ids in pulls_in.items():
-        alive = sum(length.get(i, 0) for i in ids) - dead.get(char, 0) * 1000
-        if roles.get(char) != HEALER and char in busy and alive >= 60_000:
-            share[char] = min(1.0, busy[char] / alive)
+        in_pulls = sum(length.get(i, 0) for i in ids)
+        alive = in_pulls - dead.get(char, 0) * 1000
+        if (roles.get(char) != HEALER and char in busy and in_pulls >= 60_000
+                and alive >= ACTIVE_MIN_ALIVE * in_pulls):
+            share[char] = min(1.0, busy[char] / in_pulls)
     return share
 
 
@@ -491,6 +506,17 @@ def _deaths(report: dict, players: dict[int, Char], pulls: list[Pull],
     return dict(per_pull)
 
 
+def _counted(deaths: list[Death], cutoff: int, kill: bool) -> list[Death]:
+    """The deaths that count against someone: every death on a kill (there's no wipe to call),
+    and on a wipe the first `cutoff`, after which the pull is over and the rest is the raid falling
+    down. Anyone who died at the same moment as the last counted death counts too: which of two
+    simultaneous deaths WCL happens to write first is not a reason to blame one and not the other."""
+    if kill or cutoff <= 0 or len(deaths) <= cutoff:
+        return list(deaths)
+    last = deaths[cutoff - 1].time
+    return [d for d in deaths if d.time <= last]
+
+
 def _floor(counted: dict[int, list[Death]], top_n: int) -> tuple[list[DeathLine], int]:
     deaths: Counter = Counter()
     firsts: Counter = Counter()
@@ -537,7 +563,8 @@ class Item:
     enchanted: bool
     gems: int
     bonus_ids: frozenset[int]
-    oiled: bool = False  # a temporary enchant: weapon oil, sharpening stone, shaman imbue
+    oiled: bool = False  # weapon oil or a sharpening stone: a temporary enchant that isn't a class imbue
+    imbued: bool = False  # a class's own weapon imbue fills the slot, so oil can't go on
 
 
 def _gear_at_pull(report: dict, players: dict[int, Char],
@@ -559,7 +586,8 @@ def _gear_at_pull(report: dict, players: dict[int, Char],
         out[e["fight"]][char] = [
             Item(it["id"], bool(it.get("permanentEnchant")), len(it.get("gems") or []),
                  frozenset(b for b in it.get("bonusIDs") or [] if isinstance(b, int)),
-                 bool(it.get("temporaryEnchant")))
+                 bool(it.get("temporaryEnchant")) and it.get("temporaryEnchant") not in CLASS_IMBUES,
+                 it.get("temporaryEnchant") in CLASS_IMBUES)
             if isinstance(it, dict) and it.get("id") else None
             for it in gear
         ]
@@ -771,7 +799,8 @@ def _resurrects(report: dict, players: dict[int, Char], pull_ids: set[int]) -> t
             continue
         if e.get("targetID") in players:
             brezzed[players[e["targetID"]]] += 1
-        if e.get("sourceID") in players:
+        # A self-rez (a soulstone used on yourself, Reincarnation) isn't a rez anyone gave.
+        if e.get("sourceID") in players and e.get("sourceID") != e.get("targetID"):
             given[players[e["sourceID"]]] += 1
     return brezzed, given
 
@@ -785,8 +814,8 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
     healing = _by_player(report, "healing", players)
     deaths = _deaths(report, players, pulls, settings)
     cutoff = settings.wipe_cutoff
-    # Deaths after the wipe is called don't count against anyone.
-    counted = {pid: (ds[:cutoff] if cutoff > 0 else ds) for pid, ds in deaths.items()}
+    kills = {p.id for p in pulls if p.kill}
+    counted = {pid: _counted(ds, cutoff, pid in kills) for pid, ds in deaths.items()}
     floor, tied_more = _floor(counted, settings.deaths_top_n)
     brezzed, given = _resurrects(report, players, {p.id for p in pulls})
 

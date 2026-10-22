@@ -24,6 +24,7 @@ DUAL_WIELD_SPECS = {
     263,  # Enhancement Shaman
     268, 269,  # Brewmaster, Windwalker Monk
     577, 581,  # Havoc, Vengeance Demon Hunter
+    1480,  # Demon Hunter's Midnight spec: two weapons in every log snapshot
 }
 
 OK, MISSING, NEW, LATE, PARTLY = "ok", "missing", "new", "late", "partly"

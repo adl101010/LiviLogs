@@ -32,6 +32,7 @@ VANTUS_PREFIX = "Vantus Rune"
 RETAIL = 1  # WCL's gameVersion for retail; Classic flavours have their own numbers
 MYTHIC_PLUS = 10  # WCL's difficulty for a keystone run
 DIFFICULTY_NAMES = {1: "LFR", 3: "Normal", 4: "Heroic", 5: "Mythic"}
+SESSION_GAP_MS = 6 * 3600 * 1000  # pulls this far apart are separate raid nights in one log
 
 # Letters that don't decompose into base letter + accent.
 _FOLD = str.maketrans({"ø": "o", "æ": "ae", "œ": "oe", "ð": "d", "þ": "th", "ł": "l", "đ": "d"})
@@ -77,6 +78,14 @@ class Pull:
     boss_pct: float | None  # boss health left when it ended; 0 on a kill
     phase: int | None
     players: frozenset[int]
+    fight_pct: float | None = None  # WCL's whole-fight progress left, phases included; 0 on a kill
+
+    @property
+    def progress(self) -> float | None:
+        """How far from a kill: WCL's fight progress, which counts phases, where the log has it.
+        Boss health alone would rank a phase 1 wipe at 30% above a phase 3 wipe at 44% on a boss
+        whose health resets between phases."""
+        return self.fight_pct if self.fight_pct is not None else self.boss_pct
 
     @property
     def seconds(self) -> float:
@@ -100,8 +109,8 @@ class Boss:
 
     @property
     def best_wipe(self) -> Pull | None:
-        wipes = [p for p in self.wipes if p.boss_pct is not None]
-        return min(wipes, key=lambda p: (p.boss_pct, p.start)) if wipes else None
+        wipes = [p for p in self.wipes if p.boss_pct is not None and p.progress is not None]
+        return min(wipes, key=lambda p: (p.progress, p.start)) if wipes else None
 
 
 @dataclass
@@ -227,10 +236,31 @@ class Night:
         return sum(p.seconds for p in self.pulls)
 
     @property
+    def sessions(self) -> list[list[Pull]]:
+        """The log's raid nights. Usually one; a log left running across nights (a weekly log, or
+        a logger never switched off) has several, and the hours between them are nobody's raid."""
+        nights: list[list[Pull]] = []
+        for pull in sorted(self.pulls, key=lambda p: p.start):
+            if nights and pull.start - nights[-1][-1].end < SESSION_GAP_MS:
+                nights[-1].append(pull)
+            else:
+                nights.append([pull])
+        return nights
+
+    @property
     def span_seconds(self) -> float:
-        if not self.pulls:
-            return 0
-        return (max(p.end for p in self.pulls) - min(p.start for p in self.pulls)) / 1000
+        """First pull to last, per raid night, added up."""
+        return sum((max(p.end for p in n) - min(p.start for p in n)) / 1000 for n in self.sessions)
+
+    @property
+    def first_pull_ms(self) -> int:
+        """When the raid started, as a timestamp: the first pull, not whenever logging began."""
+        return self.start_ms + min((p.start for p in self.pulls), default=0)
+
+    @property
+    def last_night_ms(self) -> int:
+        """When the last raid night in the log started."""
+        return self.start_ms + (self.sessions[-1][0].start if self.pulls else 0)
 
 
 # --- reading WCL's JSON ------------------------------------------------------------------------
@@ -284,6 +314,7 @@ def _pulls(report: dict) -> list[Pull]:
     for f in raid_fights(report):
         kill = bool(f.get("kill"))
         boss_pct = f.get("bossPercentage")
+        fight_pct = f.get("fightPercentage")
         pulls.append(Pull(
             id=f["id"],
             encounter_id=f["encounterID"],
@@ -295,6 +326,7 @@ def _pulls(report: dict) -> list[Pull]:
             boss_pct=0.0 if kill else (float(boss_pct) if isinstance(boss_pct, (int, float)) else None),
             phase=f.get("lastPhase") or None,
             players=frozenset(f.get("friendlyPlayers") or []),
+            fight_pct=0.0 if kill else (float(fight_pct) if isinstance(fight_pct, (int, float)) else None),
         ))
     return sorted(pulls, key=lambda p: p.start)
 

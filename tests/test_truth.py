@@ -139,3 +139,42 @@ def test_an_outage_isnt_blamed_on_the_credentials():
     assert "Check the client ID/secret" in asyncio.run(login(401))
     down = asyncio.run(login(503))
     assert "unavailable" in down and "secret" not in down
+
+
+# --- the night itself ------------------------------------------------------------------------
+
+def _pull(pid, start_h, end_h, kill=True, boss_pct=None, fight_pct=None, phase=None):
+    from bot.recap import Pull
+    hour = 3600 * 1000
+    return Pull(pid, 1, "Boss", kill, 5, int(start_h * hour), int(end_h * hour),
+                0.0 if kill else boss_pct, phase, frozenset(), fight_pct=0.0 if kill else fight_pct)
+
+
+def test_a_log_spanning_two_raid_nights_isnt_one_long_night():
+    """A rolling log covered Sept 22 and 23; the report called it "a 26h 51m night"."""
+    from bot.recap import Night
+    from bot.render import night_length
+    pulls = [_pull(1, 0, 1), _pull(2, 1.5, 3), _pull(3, 24, 26)]  # 21 hours between nights
+    night = Night("Log", None, 1_000_000, False, pulls, [], [], {}, [], [], {}, {}, [], 0,
+                  None, None, {}, {}, None, None)
+    assert [len(n) for n in night.sessions] == [2, 1]
+    assert night.span_seconds == 5 * 3600  # 3h + 2h of raiding, not 26h
+    assert night_length(night) == "5h 00m over 2 raid nights"
+
+
+def test_best_pull_follows_fight_progress_not_boss_health_alone():
+    """On a boss whose health resets between phases, boss health ranks a phase 1 wipe at 30%
+    above a phase 3 wipe at 44%."""
+    from bot.recap import Boss
+    early = _pull(1, 0, 1, kill=False, boss_pct=30.0, fight_pct=80.0, phase=1)
+    late = _pull(2, 1, 2, kill=False, boss_pct=44.0, fight_pct=15.0, phase=3)
+    assert Boss(1, "Boss", 5, [early, late]).best_wipe is late
+
+
+def test_a_parse_is_printed_with_its_decimals_dropped_like_wcl():
+    """Rounding printed a 98.6 as an orange 99; WCL and the parse grid show 98."""
+    import inspect
+    from bot import awards, mynight
+    for source in (inspect.getsource(awards.Builder.highlights), inspect.getsource(awards.Builder.lowlights),
+                   inspect.getsource(mynight._performance)):
+        assert ":.0f} on" not in source and "{pct:.0f}" not in source and "lo:.0f" not in source

@@ -275,7 +275,11 @@ class Builder:
                 entries = ["\n".join(lines)]
             else:
                 entries = [" · ".join(entry(b) for b in night.bosses)]
-            time = f"{fmt_duration(night.boss_seconds)} on bosses across a {fmt_duration(night.span_seconds)} night"
+            nights = len(night.sessions)
+            time = (f"{fmt_duration(night.boss_seconds)} on bosses across a {fmt_duration(night.span_seconds)} night"
+                    if nights < 2 else
+                    f"{fmt_duration(night.boss_seconds)} on bosses over {nights} raid nights "
+                    f"({fmt_duration(night.span_seconds)} from first pull to last, each night)")
             first_pull = "Bosses without a count died on the first pull · " if any(
                 b.killed and len(b.pulls) == 1 for b in night.bosses) else ""
             self.add(NIGHT, entries, cluster="bosses")
@@ -299,9 +303,9 @@ class Builder:
                          cluster="progress", stacked=True, chart=progress_chart_key(boss, index))
 
         close = [(b, b.best_wipe) for b in night.bosses if b.killed and b.best_wipe]
-        close = [(b, w) for b, w in close if w.boss_pct is not None and w.boss_pct <= 10]
+        close = [(b, w) for b, w in close if w.boss_pct is not None and w.progress is not None and w.progress <= 10]
         if close:
-            boss, wipe = min(close, key=lambda bw: bw[1].boss_pct)
+            boss, wipe = min(close, key=lambda bw: bw[1].progress)
             phase = f" in P{wipe.phase}" if wipe.phase and wipe.phase > 1 else ""
             self.add(NIGHT, [f"{boss.name} wiped with the boss at **{fmt_pct(wipe.boss_pct)}%**{phase} before going down"],
                      title="💔 Heartbreaker", cluster="facts", stacked=True)
@@ -412,7 +416,7 @@ class Builder:
         if spreads:
             s, p = min(spreads, key=lambda sp: (sp[0], -sp[1].average))
             lo, hi = min(v for v, _ in p.parses), max(v for v, _ in p.parses)
-            self.add(HIGHLIGHTS, [p.char, f" · {lo:.0f} to {hi:.0f} on every boss"], "metronome", [p.char],
+            self.add(HIGHLIGHTS, [p.char, f" · {int(lo)} to {int(hi)} on every boss"], "metronome", [p.char],
                      title="🎵 Metronome")
 
         self.counter_award(HIGHLIGHTS, "kick", "🦶 Kick captain", night.interrupts, 5, "interrupt", next_best=True)
@@ -503,7 +507,7 @@ class Builder:
         if worst:
             pct, boss, p = min(worst, key=lambda w: (w[0], w[2].char.name.casefold()))
             if pct <= 10:
-                self.add(LOWLIGHTS, [p.char, f" · {pct:.0f} on {boss}"],
+                self.add(LOWLIGHTS, [p.char, f" · {int(pct)} on {boss}"],
                          "shame", [p.char], title="🚽 Parse of shame")
 
         swings = []
@@ -515,7 +519,7 @@ class Builder:
         swings = [s for s in swings if s[0] >= 50]
         if swings:
             _, p, lo, hi = max(swings, key=lambda s: s[0])
-            self.add(LOWLIGHTS, [p.char, f" · {lo[0]:.0f} on {lo[1]} but {hi[0]:.0f} on {hi[1]}"],
+            self.add(LOWLIGHTS, [p.char, f" · {int(lo[0])} on {lo[1]} but {int(hi[0])} on {hi[1]}"],
                      "rollercoaster", [p.char], title="🎢 Rollercoaster")
 
         taken = sorted(((v, c) for c, v in night.damage_taken.items() if night.roles.get(c) != TANK),

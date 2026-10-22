@@ -12,7 +12,7 @@ from .awards import (
 from .config import RecapSettings
 from .gear import describe, gear_rows
 from .recap import DIFFICULTY_NAMES, DPS, HEALER, TANK, Char, Night
-from .render import BLURPLE, Card
+from .render import BLURPLE, Card, night_dates
 
 ROLE_LABEL = {DPS: "Damage", HEALER: "Healer", TANK: "Tank"}
 
@@ -23,7 +23,7 @@ def my_night_card(night: Night, lines: list[Line], char: Char, settings: RecapSe
     played = len(night.pulls_in.get(char, ()))
     facts = [ROLE_LABEL.get(role, "Damage")]
     if night.start_ms:
-        facts.append(f"<t:{night.start_ms // 1000}:D>")
+        facts.append(night_dates(night))
     facts.append(f"all {total} pulls" if played == total else f"{played} of {total} pulls")
 
     blocks = [b for b in (_performance(night, char, role), _deaths(night, char, settings),
@@ -52,7 +52,9 @@ def _performance(night: Night, char: Char, role: str) -> str | None:
             for boss in night.bosses:
                 if boss.name in by_boss and (parse.difficulty in (None, boss.difficulty)):
                     pct = sum(by_boss[boss.name]) / len(by_boss[boss.name])
-                    text += f"\n{parse_colour(pct)} - {boss.name} {pct:.0f}"
+                    # Decimals dropped, as WCL and the parse grid do: rounding could print a 98.6
+                    # as an orange 99 that WCL shows as 98.
+                    text += f"\n{parse_colour(pct)} - {boss.name} {int(pct)}"
             blocks.append(text)
         return "\n\n".join(blocks)
     rates = [r for r in night.rates if r.role == role]

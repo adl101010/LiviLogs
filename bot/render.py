@@ -164,8 +164,25 @@ def _text_blocks(lines: list[Line], who: _Names) -> list[str]:
 
 
 def _local_date(night: Night, tz: ZoneInfo) -> str:
-    when = datetime.fromtimestamp(night.start_ms / 1000, timezone.utc).astimezone(tz)
-    return f"{when:%b} {when.day}"
+    """The raid's date (its first pull, not when logging began); a log spanning several raid
+    nights gives the range, "Sep 22–23"."""
+    first = datetime.fromtimestamp(night.first_pull_ms / 1000, timezone.utc).astimezone(tz)
+    last = datetime.fromtimestamp(night.last_night_ms / 1000, timezone.utc).astimezone(tz)
+    if (first.month, first.day) == (last.month, last.day):
+        return f"{first:%b} {first.day}"
+    return f"{first:%b} {first.day}–{last.day}" if first.month == last.month else         f"{first:%b} {first.day}–{last:%b} {last.day}"
+
+
+def night_dates(night: Night) -> str:
+    """Discord date tags for the raid, shown in each reader's own timezone."""
+    first = f"<t:{night.first_pull_ms // 1000}:D>"
+    return first if len(night.sessions) < 2 else f"{first} to <t:{night.last_night_ms // 1000}:D>"
+
+
+def night_length(night: Night) -> str:
+    """Time from first pull to last; for a log spanning raid nights, each night's, added up."""
+    nights = len(night.sessions)
+    return fmt_duration(night.span_seconds) + (f" over {nights} raid nights" if nights > 1 else "")
 
 
 def _subject(night: Night) -> str:
@@ -209,7 +226,7 @@ def render_report(
     elif named:
         facts.append(named[0])
     if night.start_ms:
-        facts.append(f"<t:{night.start_ms // 1000}:D>")  # shows in each reader's own timezone
+        facts.append(night_dates(night))
     if prog:
         facts.append(plural(len(night.pulls), "pull"))
         facts.append("no kill yet" if night.pulls else "no boss pulls")
@@ -218,7 +235,7 @@ def render_report(
         facts.append(f"{killed} {'boss' if killed == 1 else 'bosses'} down")
         facts.append(plural(len(night.pulls), "pull"))
         if night.span_seconds:
-            facts.append(fmt_duration(night.span_seconds))
+            facts.append(night_length(night))
 
     headline_blocks = _blocks([line for line in lines if line.section == HEADLINE], who)
     notes = []

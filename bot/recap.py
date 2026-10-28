@@ -112,6 +112,31 @@ class Boss:
         wipes = [p for p in self.wipes if p.boss_pct is not None and p.progress is not None]
         return min(wipes, key=lambda p: (p.progress, p.start)) if wipes else None
 
+    @property
+    def new_bests(self) -> list[Pull]:
+        """Wipes that got further than every pull before them (the first pull sets the bar)."""
+        bests: list[Pull] = []
+        bar = None
+        for pull in self.pulls:
+            if pull.kill or pull.progress is None:
+                continue
+            if bar is not None and pull.progress < bar:
+                bests.append(pull)
+            bar = pull.progress if bar is None else min(bar, pull.progress)
+        return bests
+
+    @property
+    def phase_firsts(self) -> dict[int, int]:
+        """{pull id: phase} for the first pull to reach each phase past the first."""
+        firsts: dict[int, int] = {}
+        top = 1
+        for pull in self.pulls:
+            phase = pull.phase or 1
+            if phase > top:
+                firsts[pull.id] = phase
+                top = phase
+        return firsts
+
 
 @dataclass
 class ParseLine:
@@ -198,6 +223,8 @@ class Night:
     infusions: list["Infusion"] = field(default_factory=list)  # every Power Infusion, with its window
     pi_overwritten: list["Overwritten"] = field(default_factory=list)  # PI replaced by another priest's
     dungeons: list[str] = field(default_factory=list)  # dungeon runs in the same log, left out of the report
+    kill_ranks: dict[int, tuple[int | None, int | None]] = field(default_factory=dict)  # kill pull -> WCL speed, execution
+    biggest_hit: "BigHit | None" = None
     # WoW class per player, for colouring names. Keyed by Char.key: WCL spells realms both ways
     # in one log ("Area 52" in the rankings, "Area52" in the actor list).
     classes: dict[tuple[str, str], str] = field(default_factory=dict)
@@ -365,6 +392,72 @@ def _players(report: dict, pulls: list[Pull]) -> dict[int, Char]:
         and a.get("type") in (None, "Player")
         and (not raiders or a["id"] in raiders)
     }
+
+
+def _kill_ranks(report: dict) -> dict[int, tuple[int | None, int | None]]:
+    """WCL's speed and execution percentiles for each kill: how the kill ranks against other logged
+    kills of the boss. Fight-level, so the damage and healing rankings carry the same pair."""
+    def pct(block) -> int | None:
+        value = (block or {}).get("rankPercent") if isinstance(block, dict) else None
+        return int(value) if isinstance(value, (int, float)) else None
+    ranks: dict[int, tuple[int | None, int | None]] = {}
+    for key in ("dpsRankings", "hpsRankings"):
+        for fight in _ranking_fights(report.get(key)):
+            if isinstance(fight.get("fightID"), int) and fight["fightID"] not in ranks:
+                ranks[fight["fightID"]] = (pct(fight.get("speed")), pct(fight.get("execution")))
+    return ranks
+
+
+@dataclass
+class BigHit:
+    char: Char
+    ability: str
+    amount: int
+    crit: bool
+    pull: int
+    seconds_in: float
+    target: str | None
+
+
+CAST_WINDOW_MS = 5000  # a hit is a single cast if its caster cast that ability this long before it
+
+
+def single_cast_hits(hits: list[dict], casts: list[dict]) -> list[dict]:
+    """Damage events that came straight from a cast: the same source cast the same ability within
+    CAST_WINDOW_MS before the hit. A detonation of stored damage (Touch of the Magi, Execution
+    Sentence, Reaper's Mark, a plague erupting) goes off on its own, with no cast just before it,
+    so it never qualifies. The rule can also pass over a real cast that WCL records under a
+    different ID for the damage, so it may skip a hit, but it can't name a detonation."""
+    times: dict[tuple, list[int]] = defaultdict(list)
+    for c in casts:
+        if c.get("type") == "cast":
+            times[(c.get("sourceID"), c.get("abilityGameID"))].append(c.get("timestamp") or 0)
+    return [h for h in hits
+            if any(0 <= (h.get("timestamp") or 0) - t <= CAST_WINDOW_MS
+                   for t in times.get((h.get("sourceID"), h.get("abilityGameID")), ()))]
+
+
+def _biggest_hit(report: dict, players: dict[int, Char], pulls: dict[int, "Pull"]) -> BigHit | None:
+    """The night's biggest single cast on an enemy, by a raider or their pet, in a boss pull."""
+    hits = report.get("bigHits")
+    if not isinstance(hits, list):
+        return None
+    master = report.get("masterData") or {}
+    owners = {a.get("id"): a.get("petOwner") for a in master.get("pets") or []}
+    npcs = {a.get("id"): a.get("name") for a in master.get("npcs") or []}
+    names = {a.get("gameID"): a.get("name") for a in master.get("abilities") or []}
+    friendly = set(players) | set(owners)
+    hits = [h for h in hits if h.get("type") == "damage" and h.get("fight") in pulls
+            and h.get("targetID") not in friendly and isinstance(h.get("amount"), (int, float))]
+    for hit in sorted(single_cast_hits(hits, report.get("bigHitCasts") or []), key=lambda h: -h["amount"]):
+        source = hit.get("sourceID")
+        char = players.get(source) or players.get(owners.get(source))
+        if char:
+            pull = pulls[hit["fight"]]
+            return BigHit(char, names.get(hit.get("abilityGameID")) or "an attack", int(hit["amount"]),
+                          hit.get("hitType") == 2, pull.id, (hit.get("timestamp", 0) - pull.start) / 1000,
+                          npcs.get(hit.get("targetID")))
+    return None
 
 
 def _ranking_fights(rankings) -> list[dict]:
@@ -878,6 +971,8 @@ def analyze(report: dict, settings: RecapSettings) -> Night:
         title=report.get("title") or "Raid",
         zone=_zone(report, raid_fights(report)),
         dungeons=_dungeons(report),
+        kill_ranks=_kill_ranks(report),
+        biggest_hit=_biggest_hit(report, players, {p.id: p for p in pulls}),
         classes=_classes(report, players),
         start_ms=int(report.get("startTime") or 0),
         processing=(report.get("exportedSegments") or 0) < (report.get("segments") or 0),

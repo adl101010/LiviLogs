@@ -15,7 +15,7 @@ from .config import RecapSettings
 from .gear import describe, gear_rows
 from .recap import (
     DIFFICULTY_NAMES, DPS, FLASK_PREFIXES, FOOD_PATTERN, HEALER, TANK, VANTUS_PREFIX, Boss, Char, Night,
-    ParseLine,
+    ParseLine, Pull,
 )
 
 HEADLINE = "headline"
@@ -162,6 +162,14 @@ class Builder:
         self.settings = settings
         self.lines: list[Line] = []
 
+    def deathless(self) -> list[Pull]:
+        """Kills where nobody died."""
+        return [p for p in self.night.pulls if p.kill and not self.night.deaths.get(p.id)]
+
+    def boss_label(self, pull: Pull) -> str:
+        """The boss, with its difficulty on a night that raided more than one."""
+        return pull.boss + self.tag(pull.difficulty)
+
     @property
     def counted_note(self) -> str:
         """What a death count means wherever the report prints one."""
@@ -209,6 +217,10 @@ class Builder:
                     self.top_line(title, key, [rates[0].char], f"{fmt_rate(rates[0].per_second)}{unit}")
         if not prog_night:
             self.progress_lines(unkilled)
+        deathless = self.deathless()
+        if deathless:
+            self.add(HEADLINE, [" · ".join(dict.fromkeys(self.boss_label(p) for p in deathless))],
+                     title="😇 Deathless", cluster="tops", stacked=False)
 
         if night.high:
             self.add(HEADLINE, self.parse_list(night.high, "high"), "high", [p.char for p in night.high],
@@ -236,6 +248,15 @@ class Builder:
                 final = " · the last pull of the night" if best is boss.pulls[-1] and len(boss.pulls) > 1 else ""
                 self.add(HEADLINE, [f"{fmt_health(best.boss_pct, best.phase)}{final}"],
                          title="📈 Best pull", cluster="tops")
+                bests = boss.new_bests
+                if len(bests) >= 2:
+                    # Boss health alone, unless it ever rises along the way (a boss whose health resets
+                    # between phases): then each step says which phase it was in.
+                    rising = any(b.boss_pct >= a.boss_pct for a, b in zip(bests, bests[1:]))
+                    steps = [f"P{p.phase} {fmt_pct(p.boss_pct)}%" if rising and p.phase else f"{fmt_pct(p.boss_pct)}%"
+                             for p in bests]
+                    self.add(HEADLINE, [" → ".join(steps)], title=f"🗺️ {len(bests)} new bests", cluster="tops",
+                             stacked=False)
             else:
                 best_text = f" · best {fmt_health(best.boss_pct, best.phase)}" if best else ""
                 self.add(HEADLINE, [f"{plural(len(boss.wipes), 'wipe')}{best_text}"],
@@ -259,22 +280,39 @@ class Builder:
     def the_night(self) -> None:
         night = self.night
         if night.bosses:
-            def entry(boss: Boss) -> str:
-                if boss.killed:
-                    count = "" if len(boss.pulls) == 1 else f" ({len(boss.pulls)} pulls)"
-                    return f"✅ {boss.name}{count}"
-                return f"❌ {boss.name} ({plural(len(boss.wipes), 'wipe')})"
+            ranked = False
 
-            # A night on two difficulties killed some bosses twice, so each gets its own line.
+            def entry(boss: Boss) -> str:
+                nonlocal ranked
+                if not boss.killed:
+                    return f"❌ {boss.name} ({plural(len(boss.wipes), 'wipe')})"
+                count = "" if len(boss.pulls) == 1 else f" ({len(boss.pulls)} pulls)"
+                kills = [p for p in boss.pulls if p.kill]
+                if len(kills) > 1:  # a log spanning raid nights can hold two kills of one boss
+                    return f"✅ {boss.name}{count} · {len(kills)} kills"
+                kill = kills[0]
+                bits = [f"✅ {boss.name}{count}", fmt_seconds(kill.seconds)]
+                speed, execution = night.kill_ranks.get(kill.id, (None, None))
+                if speed is not None:
+                    bits.append(f"⚡ {speed}")
+                if execution is not None:
+                    bits.append(f"🎯 {execution}")
+                ranked = ranked or speed is not None or execution is not None
+                if not night.deaths.get(kill.id):
+                    bits.append("😇")
+                return " · ".join(bits)
+
+            # A night on two difficulties killed some bosses twice, so each gets its own heading.
             if len(night.difficulties) > 1:
                 lines = []
                 for difficulty in night.difficulties:
                     bosses = [b for b in night.bosses if b.difficulty == difficulty]
                     if bosses:
-                        lines.append(f"**{difficulty_name(difficulty)}** · " + " · ".join(entry(b) for b in bosses))
+                        lines.append(f"**{difficulty_name(difficulty)}**")
+                        lines += [entry(b) for b in bosses]
                 entries = ["\n".join(lines)]
             else:
-                entries = [" · ".join(entry(b) for b in night.bosses)]
+                entries = ["\n".join(entry(b) for b in night.bosses)]
             nights = len(night.sessions)
             time = (f"{fmt_duration(night.boss_seconds)} on bosses across a {fmt_duration(night.span_seconds)} night"
                     if nights < 2 else
@@ -282,8 +320,11 @@ class Builder:
                     f"({fmt_duration(night.span_seconds)} from first pull to last, each night)")
             first_pull = "Bosses without a count died on the first pull · " if any(
                 b.killed and len(b.pulls) == 1 for b in night.bosses) else ""
+            key = ("⚡ speed and 🎯 execution: WCL's rank for the kill against other logged kills of that boss, "
+                   "out of 100 · " if ranked else "")
+            deathless = "😇 nobody died · " if self.deathless() else ""
             self.add(NIGHT, entries, cluster="bosses")
-            self.add(NIGHT, [f"-# {first_pull}{time}"], cluster="bosses")
+            self.add(NIGHT, [f"-# {key}{deathless}{first_pull}{time}"], cluster="bosses")
 
         for index, boss in enumerate(night.bosses):
             facts = []
@@ -393,6 +434,36 @@ class Builder:
 
     def highlights(self) -> None:
         night = self.night
+        hit = night.biggest_hit
+        if hit:
+            crit = " (crit)" if hit.crit else ""
+            where = pull_label(night, hit.pull)
+            target = f"On {hit.target}, " if hit.target and hit.target != where.split(" pull ")[0] else ""
+            self.add(HIGHLIGHTS, [hit.char, f" · {hit.ability} for {hit.amount:,}{crit}"], "big_hit", [hit.char],
+                     title="💥 Biggest hit", note=f"{target}{where}, {fmt_seconds(hit.seconds_in)} in",
+                     cluster="fun", stacked=True)
+
+        # Fastest and cleanest kill, by WCL's own speed and execution ranks. Only with two kills or
+        # more: with one, it's the fastest by default.
+        ranked = [(p, night.kill_ranks[p.id]) for p in night.pulls if p.kill and p.id in night.kill_ranks]
+        deathless = {p.id for p in self.deathless()}
+        for index, title, key, what in ((0, "⚡ Fastest kill", "fastest", "speed rank"),
+                                        (1, "🎯 Cleanest kill", "cleanest", "execution rank")):
+            scored = [(r[index], p) for p, r in ranked if r[index] is not None]
+            if len(scored) < 2:
+                continue
+            top = max(v for v, _ in scored)
+            winners = [p for v, p in scored if v == top]
+            clean = index == 1 and all(p.id in deathless for p in winners)
+            if len(winners) == 1:
+                p = winners[0]
+                body = f"{self.boss_label(p)} · {fmt_seconds(p.seconds)}, {what} {top}"
+            else:
+                names = [f"{self.boss_label(p)} ({fmt_seconds(p.seconds)})" for p in winners]
+                body = f"{', '.join(names[:-1])} and {names[-1]} · {what} {top} each"
+            self.add(HIGHLIGHTS, [body + (", nobody died" if clean else "")], key,
+                     title=title, cluster="fun", stacked=False)
+
         pinks = [(p, [(pct, boss) for pct, boss in p.parses if pct >= 99]) for p in night.parses]
         pinks = [(p, hits) for p, hits in pinks if hits]
         if pinks:

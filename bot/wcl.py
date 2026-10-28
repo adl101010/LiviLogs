@@ -14,7 +14,8 @@ import httpx
 
 from .config import RecapSettings, wcl_credentials
 from .recap import (
-    CREATE_HEALTHSTONE, FLASK_PREFIXES, FOOD_PATTERN, MANA_POTION_PATTERN, is_dungeon, is_health_item,
+    CREATE_HEALTHSTONE, FLASK_PREFIXES, FOOD_PATTERN, MANA_POTION_PATTERN, _data, is_dungeon, is_health_item,
+    single_cast_hits,
 )
 
 log = logging.getLogger(__name__)
@@ -99,7 +100,12 @@ query Recap($code: String!) {
     report(code: $code) {
       code title startTime endTime segments exportedSegments visibility
       zone { id name }
-      masterData { actors(type: "Player") { id name server subType } abilities { gameID name } }
+      masterData {
+        actors(type: "Player") { id name server subType }
+        pets: actors(type: "Pet") { id petOwner }
+        npcs: actors(type: "NPC") { id name }
+        abilities { gameID name }
+      }
       dpsRankings: rankings(playerMetric: dps%(rankings_args)s)
       hpsRankings: rankings(playerMetric: hps%(rankings_args)s)
       playerDetails(%(night)s, includeCombatantInfo: false)
@@ -167,6 +173,14 @@ _EVENT_PAGES = {
     "healthItemEvents": {
         "params": "$code: String!, $start: Float!",
         "filter": "filterExpression: \"%(health_filter)s\", %(fights)s",
+    },
+    "bigHitEvents": {
+        "params": "$code: String!, $start: Float!",
+        "filter": "dataType: DamageDone, filterExpression: \"%(big_hit_filter)s\", %(fights)s",
+    },
+    "bigHitCastEvents": {
+        "params": "$code: String!, $start: Float!",
+        "filter": "dataType: Casts, filterExpression: \"%(big_cast_filter)s\", %(fights)s",
     },
     "buffEndEvents": {
         "params": "$code: String!, $start: Float!",
@@ -368,7 +382,33 @@ class WCLClient:
             await self._all_events(ref, {"nextPageTimestamp": 0}, "buffEndEvents", variables, filters)
             if filters["buff_end_filter"] else []
         )
+        report["bigHits"], report["bigHitCasts"] = await self._big_hits(ref, report, variables, filters)
         return report
+
+    async def _big_hits(self, ref: ReportRef, report: dict, variables: dict,
+                        filters: dict) -> tuple[list, list]:
+        """The night's largest hits, and the casts that would make them single casts.
+
+        WCL can't sort events, so this asks for every hit over a bar, starting at twice the night's
+        best damage per second and halving until one of them came straight from a cast. (The filter
+        field is effectiveDamage: WCL quietly matches nothing on "amount".)"""
+        table = _data(report.get("damageDone")) or {}
+        seconds = (table.get("totalTime") or 0) / 1000
+        totals = [e.get("total") or 0 for e in table.get("entries") or []]
+        if not seconds or not totals:
+            return [], []
+        bar = max(100_000, int(2 * max(totals) / seconds))
+        for _ in range(4):
+            filters["big_hit_filter"] = f"effectiveDamage > {bar}"
+            hits = await self._all_events(ref, {"nextPageTimestamp": 0}, "bigHitEvents", variables, filters)
+            if hits:
+                abilities = sorted({h["abilityGameID"] for h in hits if isinstance(h.get("abilityGameID"), int)})
+                filters["big_cast_filter"] = f"type = 'cast' and ability.id in ({', '.join(map(str, abilities))})"
+                casts = await self._all_events(ref, {"nextPageTimestamp": 0}, "bigHitCastEvents", variables, filters)
+                if single_cast_hits(hits, casts):
+                    return hits, casts
+            bar //= 2
+        return [], []
 
     async def _all_events(self, ref: ReportRef, page: dict | None, field: str, variables: dict,
                           filters: dict[str, str | None]) -> list:

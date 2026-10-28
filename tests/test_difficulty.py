@@ -61,8 +61,10 @@ def test_the_night_card_groups_by_difficulty():
     n = night()
     r, _ = report(n)
     night_card = card_text(r.thread[0])
-    assert "**Mythic** · ✅ Nek'zali the Soulcoiler · ✅ Entombed Sentinels (4 pulls)" in night_card
-    assert "**Heroic** · ✅ Nek'zali the Soulcoiler · ✅ The Coiled Altar (2 pulls) · ✅ Ula'tek" in night_card
+    mythic, heroic = night_card.split("**Mythic**\n")[1].split("**Heroic**\n")
+    assert [l.split(" · ")[0] for l in mythic.split("\n")[:2]] == ["✅ Nek'zali the Soulcoiler", "✅ Entombed Sentinels (4 pulls)"]
+    assert [l.split(" · ")[0] for l in heroic.split("\n")[:3]] == [
+        "✅ Nek'zali the Soulcoiler", "✅ The Coiled Altar (2 pulls)", "✅ Ula'tek"]
 
 
 def test_one_parse_grid_per_difficulty():

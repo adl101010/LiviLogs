@@ -438,7 +438,7 @@ def progress_chart(night: Night, boss: Boss) -> bytes | None:
     pulls = boss.pulls
     if not pulls or any(p.boss_pct is None for p in pulls):
         return None
-    left, right, top, bottom = 52, 16, 64, 62
+    left, right, top, bottom = 52, 16, 78, 62  # room above for a new best's label and "first P3"
     plot_h = 190
     width = max(left + right + 22 * len(pulls), 560)
     step = (width - left - right) / len(pulls)  # few pulls: wider slots, so the bars fill the chart
@@ -446,8 +446,11 @@ def progress_chart(night: Night, boss: Boss) -> bytes | None:
 
     canvas = Canvas(width, height)
     difficulty = DIFFICULTY.get(boss.difficulty or 0)
+    bests = {p.id for p in boss.new_bests}
+    firsts = boss.phase_firsts
+    note = f" · gold: a new best ({len(bests)} tonight)" if bests else ""
     _header(canvas, boss.name + (f" · {difficulty}" if difficulty else ""),
-            "boss health when each pull ended · lower is better")
+            f"boss health when each pull ended · lower is better{note}")
 
     def y_of(pct: float) -> float:
         return top + (1 - pct / 100) * plot_h
@@ -456,7 +459,6 @@ def progress_chart(night: Night, boss: Boss) -> bytes | None:
         canvas.line(left, y_of(tick), width - right, y_of(tick), GRID)
         canvas.text(left - 6, y_of(tick), f"{tick}%", 10, FAINT, anchor="rm")
 
-    best = boss.best_wipe
     label_every = 1 if len(pulls) <= 30 else 5
     phases_seen: set[int] = set()
     for i, pull in enumerate(pulls):
@@ -470,19 +472,22 @@ def progress_chart(night: Night, boss: Boss) -> bytes | None:
             phases_seen.add(phase)
             colour = PHASE_COLOURS[min(phase, len(PHASE_COLOURS)) - 1]
             top_y = y_of(pull.boss_pct)
-            if pull is best:
-                canvas.rect(x, top_y, w, y_of(0) - top_y, colour, radius=2, outline=GOLD, width=2)
-                canvas.text(cx, top_y - 5, f"{_pct(pull.boss_pct)}%", 11, GOLD, bold=True, anchor="md")
+            if pull.id in bests:
+                canvas.rect(x, top_y, w, max(1, y_of(0) - top_y), colour, radius=2, outline=GOLD, width=2)
+                canvas.text(cx, top_y - 5, f"{_pct(pull.boss_pct)}%", 10, GOLD, bold=True, anchor="md")
             else:
                 canvas.rect(x, top_y, w, max(1, y_of(0) - top_y), colour, radius=2)
+            if pull.id in firsts:  # the first pull to see this phase
+                canvas.text(cx, top_y - (19 if pull.id in bests else 5), f"first P{firsts[pull.id]}", 9,
+                            BRIGHT, bold=True, anchor="md")
         if (i + 1) % label_every == 0 or i == 0:
             canvas.text(cx, y_of(0) + 6, str(i + 1), 10, MUTED, anchor="ma")
     canvas.text((left + width - right) / 2, y_of(0) + 22, "pull", 10, FAINT, anchor="ma")
 
     legend = [(f"ended in P{p}" if p < max(phases_seen) or p == 1 else f"reached P{p}",
                PHASE_COLOURS[min(p, len(PHASE_COLOURS)) - 1]) for p in sorted(phases_seen)]
-    if best:
-        legend.append(("best pull", GOLD))
+    if bests:
+        legend.append(("new best", GOLD))
     if boss.killed:
         legend.append(("kill", KILL))
     _legend(canvas, 16, height - 18, legend)

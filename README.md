@@ -43,9 +43,9 @@ The thread has seven sections, each its own card, posted only if it has somethin
 
 | Section | What's in it |
 |---|---|
-| 🗺️ The night | Every boss: kills, pulls, best wipe, grouped under **Mythic** / **Heroic** when the night crossed both, so a boss killed twice reads as two kills. A boss-health bar per pull on long progression bosses, time on bosses, 💔 Heartbreaker (closest wipe before a kill), 🧱 Wall of the night, ☠️ Raid's nemesis, 🧨 Wipe starter |
+| 🗺️ The night | Every boss on its own line: each kill's time, WCL's ⚡ speed and 🎯 execution ranks for it (out of 100, against other logged kills of that boss), 😇 if nobody died; pulls and best wipe, grouped under **Mythic** / **Heroic** when the night crossed both, so a boss killed twice reads as two kills. A boss-health bar per pull on long progression bosses, time on bosses, 💔 Heartbreaker (closest wipe before a kill), 🧱 Wall of the night, ☠️ Raid's nemesis, 🧨 Wipe starter |
 | 📊 Parses | Everyone's night average by role, in WCL's colours, 👑 on top, one grid per difficulty on a night that raided two. On a night with no kills: raw DPS/HPS instead (wipes don't get parses) |
-| 🌟 Highlights | 🩷 Pink parse, 🎵 Metronome, 🦶 Kick captain, 🧼 Dispel machine, 🪄 Necromancer, 💜 Power Infusion (each priest's targets, most to least), 🪫 Overwritten (a priest's PI replaced by another's), 🧍 Last one standing |
+| 🌟 Highlights | 💥 Biggest hit (the night's largest single cast on an enemy, by a raider or their pet), ⚡ Fastest kill, 🎯 Cleanest kill, 🩷 Pink parse, 🎵 Metronome, 🦶 Kick captain, 🧼 Dispel machine, 🪄 Necromancer, 💜 Power Infusion (each priest's targets, most to least), 🪫 Overwritten (a priest's PI replaced by another's), 🧍 Last one standing |
 | 🤡 Lowlights | 🚽 Parse of shame, 🎢 Rollercoaster, 🧽 Damage sponge, 🛡️ Outdamaged by a tank, 💤 Idle (DPS and tanks well under the raid's usual active time) |
 | 💀 Deaths | 💀 Floor inspector, 🐤 Canary, 🎁 Couldn't wait for loot, 🎯 Nemesis, 🧲 Brez magnet, 👻 Ghost (most time spent dead, 3 minutes or more), ⏱️ Speedrunner |
 | 🧪 Consumables | 🔮 Tryhards (Void-Touched rune), 🍺 Potion seller, 🫗 Mana chugger, 🍪 Cookie monster, 🧪 Potion hoarders, 🪦 Died with a healthstone in the bag, ⚗️ No flask, 🍗 Forgot to eat, 🛢️ No weapon oil, 📜 No vantus, ⌛ Ran out mid-pull (flask or food expired during a pull; weapon oil that ran out between pulls). Retail only |
@@ -65,8 +65,9 @@ in their class colour (shaman blue lifted a little so it reads on the dark backg
   found by name ("Mana Potion") in each log, so new expansions need no setting. Replaces the
   tryhard, hoarder, healthstone, flask, food and vantus callouts; the potion seller, mana chugger
   and cookie monster shoutouts stay as text.
-- **Progress:** a boss's health at the end of each pull, coloured by phase, with the best pull
-  marked. Replaces the `▇▅▅▄` bar strip, for bosses pulled 3 or more times.
+- **Progress:** a boss's health at the end of each pull, coloured by phase. Every new best (a
+  pull that got further than all before it) is outlined in gold with its health, and the first pull
+  to reach each phase is labelled "first P2", "first P3". Replaces the `▇▅▅▄` bar strip, for bosses pulled 3 or more times.
 - **Gear check:** one row per raider, a column each for helm, shoulders, chest, legs, boots, rings
   and weapons, plus gems. Every pull is checked, so it also catches a piece looted mid-raid and
   never enchanted ("new: 11 pulls"), and shows who enchanted partway through ("pull 4"). Rings, and
@@ -94,7 +95,16 @@ How the numbers work:
   else's as the tier goes on, so the site's parses drift down a point or two over the following days.
 - **Progression nights** (no kills) swap parses for raw DPS/HPS, divided by the time each person was
   actually in pulls; anyone who sat some out gets a "(6 pulls)" note instead of a bad number. The
-  headline shows the night's best pull.
+  headline shows the night's best pull, and its new bests in order ("🗺️ 7 new bests · 58% → … → 5.1%").
+- **😇 Deathless** (headline): kills where nobody died.
+- **💥 Biggest hit** counts single casts only: a hit qualifies when the same raider (or pet) cast that
+  ability in the 5 seconds before it. A detonation of stored damage (Touch of the Magi, Execution
+  Sentence, Reaper's Mark, a plague erupting) fires on its own with no cast just before it, so it
+  never qualifies; a real cast WCL logs under a different ID for its damage can be passed over. The
+  bot asks for hits over twice the night's best damage per second and halves the bar until a single
+  cast turns up. (WCL's filter field is `effectiveDamage`; `amount` silently matches nothing.)
+- **⚡ Speed and 🎯 execution** are WCL's own percentiles for each kill, as they stood when the report
+  posted. WCL re-ranks as more guilds log the boss, so the site's numbers drift down over the weeks.
 - **Idle** is each DPS and tank's WCL "active time" (time spent dealing damage) over their time
   alive in boss pulls. Anyone 10 or more points under the raid's median is called out (up to 3).
   It's compared with the raid rather than a fixed bar because movement-heavy prog wipes pull

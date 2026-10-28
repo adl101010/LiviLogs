@@ -168,7 +168,8 @@ def test_headline_card():
         "**🏆 Top DPS** - <@111> 94.5\n"
         "**💚 Top healer** - **Healz** 65.0\n"
         "**🛡️ Top tank** - **Tanky** 6.5\n"
-        "**📈 Boss C** - 2 wipes · best P2 at 30%",
+        "**📈 Boss C** - 2 wipes · best P2 at 30%\n"
+        "**😇 Deathless** - Boss B",
         "**🌟 90+** - <@111> damage 94.5 · **Middling** damage 90.0\n"
         "**🗑️ Grey** - <@222> damage 20.0\n"
         "**💀 Floor inspector** - **Dyer** 3 deaths",
@@ -187,8 +188,10 @@ def test_thread_cards_in_order_with_their_colours():
 def test_the_night():
     card = full_text().thread[0]
     assert card.blocks[0] == (
-        "✅ Boss A (2 pulls) · ✅ Boss B · ❌ Boss C (2 wipes)\n"
-        "-# Bosses without a count died on the first pull · 13m on bosses across a 20m night"
+        "✅ Boss A (2 pulls) · 3m 20s\n"
+        "✅ Boss B · 3m 20s · 😇\n"  # nobody died on Boss B; no WCL ranks in this hand-built log
+        "❌ Boss C (2 wipes)\n"
+        "-# 😇 nobody died · Bosses without a count died on the first pull · 13m on bosses across a 20m night"
     )
     assert card.blocks[1] == "**📉 Boss C progress**\nbest P2 at 30%"
     assert card.blocks[2] == "**💔 Heartbreaker**\nBoss A wiped with the boss at **8%** in P2 before going down"

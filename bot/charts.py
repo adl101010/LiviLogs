@@ -226,11 +226,14 @@ def parse_chart(night: Night, difficulty: int | None = None) -> bytes | None:
 # --- consumables -------------------------------------------------------------------------------
 
 def potions_used(row: ConsumableRow) -> tuple[str, str]:
-    """Every potion drunk: "23", or for a healer "22 mana" / "3 + 22 mana"."""
+    """Every potion drunk: "23", or for a healer "22 mana" / "3 + 22 mana". A zero is yellow when
+    it's a potion hoarder's (three or more pulls without one)."""
     if row.role == HEALER and row.mana_potions:
         text = f"{row.combat_potions} + {row.mana_potions} mana" if row.combat_potions else f"{row.mana_potions} mana"
         return text, "plain"
-    return str(row.combat_potions), "plain" if row.combat_potions else "dim"
+    if row.combat_potions:
+        return str(row.combat_potions), "plain"
+    return "0", "warn" if "hoarder" in row.flags else "dim"
 
 
 def _consumable_cells(row: ConsumableRow, show_vantus: bool, show_rune: bool,

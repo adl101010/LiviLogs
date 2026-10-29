@@ -125,7 +125,7 @@ def test_grid_shows_pulls_potted_and_potions_used():
     # Columns: flask, food, pulls potted, potions used, healthstones, vantus, rune.
     assert cells["Pumper"][2:4] == [("5/5", "ok"), ("6", "plain")]  # a second potion on one pull
     assert cells["Greyson"][2:4] == [("1/5", "warn"), ("1", "plain")]  # a potion hoarder
-    assert cells["Tanky"][2:4] == [("0/5", "warn"), ("0", "dim")]
+    assert cells["Tanky"][2:4] == [("0/5", "warn"), ("0", "warn")]  # not one all night: both cells
     # Healers: mana potions count as potted pulls and are called out in the total.
     assert cells["Healz"][2:4] == [("3/5", "plain"), ("4 mana", "plain")]
 

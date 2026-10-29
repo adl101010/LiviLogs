@@ -541,10 +541,10 @@ class Builder:
                 parts.append("\n")
             ordered = sorted(targets.items(), key=lambda rn: (-rn[1], rn[0].name.casefold()))
             shown, rest = ordered[:PI_MAX_NAMES], ordered[PI_MAX_NAMES:]
-            parts += [giver, " · "] if len(by_giver) > 1 else []
+            parts += [giver, " → "] if len(by_giver) > 1 else []
             for j, (receiver, given) in enumerate(shown):
                 parts += [" · "] if j else []
-                parts += [receiver, f" {int(given)}"]
+                parts += [receiver, f" ×{int(given)}"]
                 winners.append(receiver)
             if rest:
                 parts.append(f" · +{len(rest)} more")

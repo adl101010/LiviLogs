@@ -218,7 +218,7 @@ def test_awards():
     assert "**🎯 Nemesis** - **Dyer** died to Fire 3 times" in text
     assert "**🧲 Brez magnet** - **Dyer** · rezzed 3 times" in text
     assert "**👻 Ghost** - **Greyson** · spent 4m 19s dead" in text
-    assert "**💜 Power Infusion**\n-# Who got it, most to least, all from Healz\n**Pumper** 4" in text
+    assert "**💜 Power Infusion**\n-# Who got it, most to least, all from Healz\n**Pumper** ×4" in text
     assert "**💀 Floor inspector**\n-# Every death on a kill, and the first 5 of each wipe\n**Dyer** 3 · **Greyson** 2" in text
     # Nothing worth saying tonight: these stay silent rather than print a weak line.
     for quiet in ("Metronome", "Rollercoaster", "Canary", "Couldn't wait for loot",
@@ -398,7 +398,7 @@ def test_power_infusion_lists_each_priests_targets():
     text = all_text(full_text(data))
     assert "**💜 Power Infusion**\n-# Who each priest infused, most to least\n" in text
     # A line per priest, the busier one first, with each one's targets most to least.
-    assert "**Healz** · **Middling** 6 · **Pumper** 4\n**Tanky** · **Dyer** 2" in text
+    assert "**Healz** → **Middling** ×6 · **Pumper** ×4\n**Tanky** → **Dyer** ×2" in text
 
 
 def test_a_priest_topping_up_one_person_isnt_listed():

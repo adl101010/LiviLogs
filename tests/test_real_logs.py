@@ -82,7 +82,7 @@ def test_guild_prog_night():
     assert "died to Necrotic Vapors 6 times" in text
     assert " · spent 12m 22s dead" in text  # ghost
     # One priest, two targets: listed most to least, with the priest named once in the note.
-    assert "-# Who got it, most to least, all from P-f7d636" in text and "** 30 · **" in text
+    assert "-# Who got it, most to least, all from P-f7d636" in text and "** ×30 · **" in text
 
     consumables = card_text(next(c for c in r.thread if c.title.startswith("🧪")))
     assert "28 combat potions in 18 pulls" in consumables

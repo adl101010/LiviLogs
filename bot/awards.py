@@ -993,7 +993,7 @@ class ConsumableRow:
     vantus: int  # of vantus_pulls
     vantus_pulls: int  # pulls where most of the raid had a vantus rune
     flags: set[str] = field(default_factory=set)  # tryhard, hoarder, healthstone_bag, no_flask, no_food,
-    # no_oil, no_vantus
+    # no_oil, no_vantus; no_health_items colours the grid only (it isn't a callout)
     combat_potions: int = 0  # every combat potion drunk
     potted: int = 0  # "pulls potted": pulls with at least one potion (for healers, a mana potion counts)
     oil: int = 0  # pulls with a weapon oil (or stone, or shaman imbue) on the main hand
@@ -1063,6 +1063,10 @@ def consumable_rows(night: Night, settings: RecapSettings) -> list[ConsumableRow
                 row.flags.add("hoarder")
         if night.casts_known and counted[row.char] >= 2 and not row.health_items:
             row.flags.add("healthstone_bag")
+        # The grid flags every zero, deaths or not: a healer who barely died (a priest's Spirit of
+        # Redemption) isn't called out, but the night's column should still show they had none.
+        if night.casts_known and row.pulls >= 3 and not row.health_items:
+            row.flags.add("no_health_items")
         if row.snapshots - row.flask >= 2:
             row.flags.add("no_flask")
         if row.snapshots - row.food >= 2:

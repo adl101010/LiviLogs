@@ -71,6 +71,10 @@ def test_consumables_grid_flags_match_the_callouts():
         winners = winners_by_key(build_lines(night, SETTINGS))
         for flag in ("tryhard", "hoarder", "healthstone_bag", "no_flask", "no_food", "no_vantus"):
             assert {r.char for r in rows if flag in r.flags} == set(winners.get(flag, [])), (name, flag)
+        # The healthstone column is yellow for every zero; the callout is only those who died twice.
+        zero = {r.char for r in rows if "no_health_items" in r.flags}
+        assert zero >= set(winners.get("healthstone_bag", []))
+        assert zero == {r.char for r in rows if r.pulls >= 3 and not r.health_items}
 
 
 def test_charts_replace_their_lines_in_the_card_but_not_in_the_fallback():

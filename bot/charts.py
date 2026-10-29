@@ -245,7 +245,7 @@ def _consumable_cells(row: ConsumableRow, show_vantus: bool, show_rune: bool,
         cells.append(fraction(row.oil, row.oil_pulls, "no_oil") if row.oil_pulls else ("–", "dim"))
     cells += [fraction(row.potted, row.pulls, "hoarder"), potions_used(row)]
     cells.append((str(row.health_items),
-                  "warn" if "healthstone_bag" in row.flags else "plain" if row.health_items else "dim"))
+                  "warn" if "no_health_items" in row.flags else "plain" if row.health_items else "dim"))
     if show_vantus:
         if row.vantus_pulls:
             cells.append(fraction(row.vantus, row.vantus_pulls, "no_vantus"))
@@ -280,7 +280,8 @@ def consumables_chart(night: Night, settings: RecapSettings) -> bytes | None:
         x += w + 3
     notes = ["Pulls potted: pulls with at least one combat potion, out of pulls they were in (healers: mana potions count).",
              "Potions used: combat potions drunk all night, plus mana potions for healers. Two on one pull counts as two.",
-             "Healthstone / potion: healthstones and health potions used. Vantus: out of the pulls most of the raid had one.",
+             "Healthstone / potion: healthstones and health potions used; yellow is none all night, called out after 2+ deaths.",
+             "Vantus: out of the pulls most of the raid had one.",
              "– means it didn't apply: no vantus pull, or a class imbue on the weapon where oil would go."]
 
     name_w = max(text_width(r.char.name, 13) for r in rows) + 14
